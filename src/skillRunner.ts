@@ -3,38 +3,63 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export type SkillName =
+  // Workflow
   | 'update-tests'
   | 'update-uat'
   | 'regression'
   | 'sync-design'
+  | 'done-check'
+  // API
   | 'audit-api'
-  | 'sync-api-docs';
+  | 'sync-api-docs'
+  // Capture
+  | 'log-decision'
+  | 'capture-pattern'
+  | 'log-failure'
+  | 'log-debt'
+  // Generate
+  | 'release-notes'
+  | 'post-review'
+  | 'update-playbooks';
 
-const SKILL_META: Record<SkillName, { label: string; description: string }> = {
-  'update-tests': {
-    label: 'Update Tests',
-    description: 'Generate and update functional and non-functional tests from instruction history',
-  },
-  'update-uat': {
-    label: 'Update UAT Spec',
-    description: 'Regenerate UAT.md from instruction-history.toon',
-  },
-  'regression': {
-    label: 'Run Regression Suite',
-    description: 'Run Jest, TypeScript check, lint, and manual UAT checklist',
-  },
-  'sync-design': {
-    label: 'Sync Design Standards',
-    description: 'Scan codebase and update design-standards.md',
-  },
-  'audit-api': {
-    label: 'Audit API',
-    description: 'Check all routes for auth, rate limiting, validation, and Swagger coverage — writes .claude/api-audit.json',
-  },
-  'sync-api-docs': {
-    label: 'Sync API Docs',
-    description: 'Generate or update Swagger/OpenAPI documentation for undocumented routes',
-  },
+export type SkillCategory = 'workflow' | 'api' | 'capture' | 'generate';
+
+interface SkillMeta {
+  label: string;
+  description: string;
+  icon: string;
+  category: SkillCategory;
+}
+
+const SKILL_META: Record<SkillName, SkillMeta> = {
+  // ── Workflow ──
+  'update-tests':  { label: 'Update Tests',          description: 'Generate/update tests from instruction history',                 icon: 'beaker',       category: 'workflow' },
+  'update-uat':    { label: 'Update UAT',             description: 'Regenerate UAT.md from instruction-history.toon',                icon: 'checklist',    category: 'workflow' },
+  'regression':    { label: 'Run Regression',         description: 'Run Jest, TypeScript check, lint, and UAT checklist',            icon: 'run-all',      category: 'workflow' },
+  'sync-design':   { label: 'Sync Design Standards',  description: 'Scan codebase and update design-standards.md',                   icon: 'symbol-color', category: 'workflow' },
+  'done-check':    { label: 'Definition of Done',     description: 'Run the full DoD checklist against recent work',                 icon: 'tasklist',     category: 'workflow' },
+
+  // ── API ──
+  'audit-api':     { label: 'Audit API',              description: 'Check routes for auth, rate limits, validation, Swagger',        icon: 'shield',       category: 'api' },
+  'sync-api-docs': { label: 'Sync API Docs',          description: 'Generate/update Swagger for undocumented routes',                icon: 'file-code',    category: 'api' },
+
+  // ── Capture ──
+  'log-decision':    { label: 'Log Decision',         description: 'Append to decision-log.md — what, why, alternatives, trade-offs', icon: 'milestone',   category: 'capture' },
+  'capture-pattern': { label: 'Capture Pattern',      description: 'Extract a reusable pattern into patterns-library.md',             icon: 'extensions',  category: 'capture' },
+  'log-failure':     { label: 'Log Failure Mode',     description: 'Add to failure-modes.md — symptoms, diagnosis, fix, prevention',  icon: 'bug',         category: 'capture' },
+  'log-debt':        { label: 'Log Tech Debt',        description: 'Add to tech-debt.md — impact, effort, trigger for action',        icon: 'flame',       category: 'capture' },
+
+  // ── Generate ──
+  'release-notes':    { label: 'Release Notes',       description: 'Generate release notes from recent history',                      icon: 'tag',         category: 'generate' },
+  'post-review':      { label: 'Post-Review',         description: 'Capture what slowed you down, what was missing',                  icon: 'comment-discussion', category: 'generate' },
+  'update-playbooks': { label: 'Update Playbooks',    description: 'Update agent-playbooks.md with prompt templates and patterns',    icon: 'robot',       category: 'generate' },
+};
+
+export const SKILL_CATEGORIES: Record<SkillCategory, string> = {
+  workflow: 'Workflow',
+  api:      'API',
+  capture:  'Capture',
+  generate: 'Generate',
 };
 
 export class SkillRunner {
@@ -51,40 +76,25 @@ export class SkillRunner {
     const skillExists = fs.existsSync(skillFile);
 
     if (!skillExists) {
-      const open = await vscode.window.showWarningMessage(
+      const choice = await vscode.window.showWarningMessage(
         `Skill file not found: .claude/skills/${skill}.md`,
-        'Open Skills Folder'
+        'Scaffold All Skills',
+        'Cancel'
       );
-      if (open) {
-        vscode.commands.executeCommand(
-          'revealInExplorer',
-          vscode.Uri.file(path.join(this.workspaceRoot, '.claude', 'skills'))
-        );
+      if (choice === 'Scaffold All Skills') {
+        void vscode.commands.executeCommand('claudeWorkflow.scaffoldSkills');
       }
       return;
     }
 
     const meta = SKILL_META[skill];
-
     const terminal = this.getOrCreateTerminal();
     terminal.show(true);
-
-    // Run claude with the slash command — Claude Code picks up local skills from .claude/skills/
     terminal.sendText(`cd "${this.workspaceRoot}" && ${claudePath} "/${skill}"`, true);
 
     void vscode.window.showInformationMessage(
       `Claude: ${meta.label} — running in terminal`
     );
-  }
-
-  async runRegressionInline(): Promise<void> {
-    // For regression we can also just run npm test directly in a new terminal
-    const terminal = vscode.window.createTerminal({
-      name: 'Regression Suite',
-      cwd: this.workspaceRoot,
-    });
-    terminal.show(true);
-    terminal.sendText('npm run test && npm run check && npm run lint', true);
   }
 
   skillExists(skill: SkillName): boolean {
@@ -97,9 +107,18 @@ export class SkillRunner {
     return (Object.keys(SKILL_META) as SkillName[]).filter(s => this.skillExists(s));
   }
 
+  getSkillsByCategory(): Map<SkillCategory, SkillName[]> {
+    const map = new Map<SkillCategory, SkillName[]>();
+    for (const [name, meta] of Object.entries(SKILL_META)) {
+      const list = map.get(meta.category) ?? [];
+      list.push(name as SkillName);
+      map.set(meta.category, list);
+    }
+    return map;
+  }
+
   private getOrCreateTerminal(): vscode.Terminal {
-    // Reuse existing terminal if still alive
-    if (this.terminal && this.isTerminalAlive(this.terminal)) {
+    if (this.terminal && vscode.window.terminals.includes(this.terminal)) {
       return this.terminal;
     }
     this.terminal = vscode.window.createTerminal({
@@ -109,11 +128,11 @@ export class SkillRunner {
     return this.terminal;
   }
 
-  private isTerminalAlive(terminal: vscode.Terminal): boolean {
-    return vscode.window.terminals.includes(terminal);
+  static getMeta(skill: SkillName): SkillMeta {
+    return SKILL_META[skill];
   }
 
-  static getMeta(skill: SkillName) {
-    return SKILL_META[skill];
+  static getAllSkillNames(): SkillName[] {
+    return Object.keys(SKILL_META) as SkillName[];
   }
 }

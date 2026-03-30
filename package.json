@@ -1,148 +1,58 @@
 {
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
-  "description": "Session checklist, skill runner, API auditing, and living docs for Claude Code agent projects",
-  "version": "0.2.0",
+  "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, failure modes, tech debt, and more",
+  "version": "0.3.0",
   "publisher": "agmenzies",
   "repository": {
     "type": "git",
     "url": "https://github.com/agmenzies/claude-code-workflow.git"
   },
-  "engines": {
-    "vscode": "^1.85.0"
-  },
+  "engines": { "vscode": "^1.85.0" },
   "categories": ["Other", "Linters"],
-  "keywords": ["claude", "claude-code", "ai", "agents", "workflow", "api", "openapi", "swagger"],
-  "activationEvents": [
-    "workspaceContains:.claude/skills"
-  ],
+  "keywords": ["claude", "claude-code", "ai", "agents", "workflow", "api", "openapi", "delivery"],
+  "activationEvents": ["workspaceContains:.claude/skills"],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "claudeWorkflow.updateTests",
-        "title": "Update Tests from History",
-        "category": "Claude Workflow",
-        "icon": "$(beaker)"
-      },
-      {
-        "command": "claudeWorkflow.updateUAT",
-        "title": "Update UAT Spec",
-        "category": "Claude Workflow",
-        "icon": "$(checklist)"
-      },
-      {
-        "command": "claudeWorkflow.regression",
-        "title": "Run Regression Suite",
-        "category": "Claude Workflow",
-        "icon": "$(run-all)"
-      },
-      {
-        "command": "claudeWorkflow.syncDesign",
-        "title": "Sync Design Standards",
-        "category": "Claude Workflow",
-        "icon": "$(symbol-color)"
-      },
-      {
-        "command": "claudeWorkflow.auditApi",
-        "title": "Audit API",
-        "category": "Claude Workflow",
-        "icon": "$(shield)"
-      },
-      {
-        "command": "claudeWorkflow.syncApiDocs",
-        "title": "Sync API Docs",
-        "category": "Claude Workflow",
-        "icon": "$(file-code)"
-      },
-      {
-        "command": "claudeWorkflow.scaffoldApiSkills",
-        "title": "Scaffold API Skills",
-        "category": "Claude Workflow",
-        "icon": "$(wand)"
-      },
-      {
-        "command": "claudeWorkflow.appendHistory",
-        "title": "Append to Instruction History",
-        "category": "Claude Workflow",
-        "icon": "$(add)"
-      },
-      {
-        "command": "claudeWorkflow.refresh",
-        "title": "Refresh",
-        "category": "Claude Workflow",
-        "icon": "$(refresh)"
-      }
+      { "command": "claudeWorkflow.updateTests",     "title": "Update Tests from History",      "category": "Claude Workflow", "icon": "$(beaker)" },
+      { "command": "claudeWorkflow.updateUAT",       "title": "Update UAT Spec",                "category": "Claude Workflow", "icon": "$(checklist)" },
+      { "command": "claudeWorkflow.regression",      "title": "Run Regression Suite",            "category": "Claude Workflow", "icon": "$(run-all)" },
+      { "command": "claudeWorkflow.syncDesign",      "title": "Sync Design Standards",           "category": "Claude Workflow", "icon": "$(symbol-color)" },
+      { "command": "claudeWorkflow.doneCheck",       "title": "Definition of Done Check",        "category": "Claude Workflow", "icon": "$(tasklist)" },
+      { "command": "claudeWorkflow.auditApi",        "title": "Audit API",                       "category": "Claude Workflow", "icon": "$(shield)" },
+      { "command": "claudeWorkflow.syncApiDocs",     "title": "Sync API Docs",                   "category": "Claude Workflow", "icon": "$(file-code)" },
+      { "command": "claudeWorkflow.logDecision",     "title": "Log Decision",                    "category": "Claude Workflow", "icon": "$(milestone)" },
+      { "command": "claudeWorkflow.capturePattern",  "title": "Capture Pattern",                 "category": "Claude Workflow", "icon": "$(extensions)" },
+      { "command": "claudeWorkflow.logFailure",      "title": "Log Failure Mode",                "category": "Claude Workflow", "icon": "$(bug)" },
+      { "command": "claudeWorkflow.logDebt",         "title": "Log Tech Debt",                   "category": "Claude Workflow", "icon": "$(flame)" },
+      { "command": "claudeWorkflow.releaseNotes",    "title": "Generate Release Notes",          "category": "Claude Workflow", "icon": "$(tag)" },
+      { "command": "claudeWorkflow.postReview",      "title": "Post-Implementation Review",      "category": "Claude Workflow", "icon": "$(comment-discussion)" },
+      { "command": "claudeWorkflow.updatePlaybooks", "title": "Update Agent Playbooks",          "category": "Claude Workflow", "icon": "$(robot)" },
+      { "command": "claudeWorkflow.scaffoldSkills",  "title": "Scaffold All Skills",             "category": "Claude Workflow", "icon": "$(wand)" },
+      { "command": "claudeWorkflow.appendHistory",   "title": "Append to Instruction History",   "category": "Claude Workflow", "icon": "$(add)" },
+      { "command": "claudeWorkflow.refresh",         "title": "Refresh",                         "category": "Claude Workflow", "icon": "$(refresh)" }
     ],
     "views": {
-      "explorer": [
-        {
-          "id": "claudeWorkflowPanel",
-          "name": "Claude Code Workflow",
-          "when": "claudeWorkflow.active"
-        }
-      ]
+      "explorer": [{
+        "id": "claudeWorkflowPanel",
+        "name": "Claude Code Workflow",
+        "when": "claudeWorkflow.active"
+      }]
     },
     "menus": {
-      "view/title": [
-        {
-          "command": "claudeWorkflow.refresh",
-          "when": "view == claudeWorkflowPanel",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "claudeWorkflow.updateTests",
-          "when": "view == claudeWorkflowPanel && viewItem == skill-update-tests",
-          "group": "inline"
-        },
-        {
-          "command": "claudeWorkflow.updateUAT",
-          "when": "view == claudeWorkflowPanel && viewItem == skill-update-uat",
-          "group": "inline"
-        },
-        {
-          "command": "claudeWorkflow.regression",
-          "when": "view == claudeWorkflowPanel && viewItem == skill-regression",
-          "group": "inline"
-        },
-        {
-          "command": "claudeWorkflow.syncDesign",
-          "when": "view == claudeWorkflowPanel && viewItem == skill-sync-design",
-          "group": "inline"
-        },
-        {
-          "command": "claudeWorkflow.auditApi",
-          "when": "view == claudeWorkflowPanel && viewItem == skill-audit-api",
-          "group": "inline"
-        },
-        {
-          "command": "claudeWorkflow.syncApiDocs",
-          "when": "view == claudeWorkflowPanel && viewItem == skill-sync-api-docs",
-          "group": "inline"
-        }
-      ]
+      "view/title": [{
+        "command": "claudeWorkflow.refresh",
+        "when": "view == claudeWorkflowPanel",
+        "group": "navigation"
+      }]
     },
     "keybindings": [
-      {
-        "command": "claudeWorkflow.regression",
-        "key": "ctrl+shift+alt+r",
-        "mac": "cmd+shift+alt+r",
-        "when": "claudeWorkflow.active"
-      },
-      {
-        "command": "claudeWorkflow.updateTests",
-        "key": "ctrl+shift+alt+t",
-        "mac": "cmd+shift+alt+t",
-        "when": "claudeWorkflow.active"
-      },
-      {
-        "command": "claudeWorkflow.auditApi",
-        "key": "ctrl+shift+alt+a",
-        "mac": "cmd+shift+alt+a",
-        "when": "claudeWorkflow.active"
-      }
+      { "command": "claudeWorkflow.regression",     "key": "ctrl+shift+alt+r", "mac": "cmd+shift+alt+r", "when": "claudeWorkflow.active" },
+      { "command": "claudeWorkflow.updateTests",    "key": "ctrl+shift+alt+t", "mac": "cmd+shift+alt+t", "when": "claudeWorkflow.active" },
+      { "command": "claudeWorkflow.auditApi",       "key": "ctrl+shift+alt+a", "mac": "cmd+shift+alt+a", "when": "claudeWorkflow.active" },
+      { "command": "claudeWorkflow.doneCheck",      "key": "ctrl+shift+alt+d", "mac": "cmd+shift+alt+d", "when": "claudeWorkflow.active" },
+      { "command": "claudeWorkflow.logDecision",    "key": "ctrl+shift+alt+l", "mac": "cmd+shift+alt+l", "when": "claudeWorkflow.active" }
     ],
     "configuration": {
       "title": "Claude Code Workflow",
@@ -170,40 +80,20 @@
         "claudeWorkflow.routeGlobs": {
           "type": "array",
           "items": { "type": "string" },
-          "default": [
-            "server/routes/**/*.ts",
-            "src/routes/**/*.ts",
-            "routes/**/*.ts",
-            "app/routes/**/*.ts",
-            "server/routes/**/*.js"
-          ],
+          "default": ["server/routes/**/*.ts", "src/routes/**/*.ts", "routes/**/*.ts", "app/routes/**/*.ts", "server/routes/**/*.js"],
           "description": "Glob patterns for route files to scan for API coverage"
         },
         "claudeWorkflow.swaggerGlobs": {
           "type": "array",
           "items": { "type": "string" },
-          "default": [
-            "server/swagger/**/*.yaml",
-            "server/swagger/**/*.yml",
-            "server/swagger/**/*.json",
-            "swagger/**/*.yaml",
-            "swagger/**/*.yml",
-            "openapi/**/*.yaml",
-            "docs/api/**/*.yaml"
-          ],
+          "default": ["server/swagger/**/*.yaml", "server/swagger/**/*.yml", "server/swagger/**/*.json", "swagger/**/*.yaml", "openapi/**/*.yaml"],
           "description": "Glob patterns for Swagger/OpenAPI documentation files"
         },
         "claudeWorkflow.publicRoutePrefixes": {
           "type": "array",
           "items": { "type": "string" },
-          "default": [
-            "/health",
-            "/api/health",
-            "/api/public",
-            "/api/auth/login",
-            "/api/auth/register"
-          ],
-          "description": "Route path prefixes that are intentionally public — auth not required, shown as info not warning"
+          "default": ["/health", "/api/health", "/api/public", "/api/auth/login", "/api/auth/register"],
+          "description": "Route prefixes that are intentionally public (auth not required)"
         }
       }
     }

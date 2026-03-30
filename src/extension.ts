@@ -6,18 +6,14 @@ import { SkillRunner } from './skillRunner';
 import { WorkflowPanelProvider } from './workflowPanel';
 import { WorkflowStatusBar } from './statusBar';
 import { ApiDiagnosticsProvider } from './apiDiagnostics';
-import { AUDIT_API_SKILL, SYNC_API_DOCS_SKILL } from './skillTemplates';
+import { getScaffoldableTemplates } from './skillTemplates';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getWorkspaceRoot();
   if (!root) return;
 
-  if (!hasClaudeSkills(root)) {
-    // Workspace doesn't use Claude Code skills — stay dormant
-    return;
-  }
+  if (!hasClaudeSkills(root)) return;
 
-  // Signal to menus that the extension is active
   void vscode.commands.executeCommand('setContext', 'claudeWorkflow.active', true);
 
   // Core services
@@ -27,13 +23,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const panelProvider = new WorkflowPanelProvider(root, runner);
   const apiDiagnostics = new ApiDiagnosticsProvider(root);
 
-  // Wire up history tracker → status bar + panel
+  // Wire history → status bar + panel
   tracker.onDidChange(state => {
     statusBar.update(state);
     panelProvider.updateHistory(state);
   });
 
-  // Wire up API diagnostics → panel
+  // Wire API diagnostics → panel
   apiDiagnostics.onSummaryChanged(summary => {
     panelProvider.updateAudit(summary, apiDiagnostics.isAuditStale());
   });
@@ -41,30 +37,42 @@ export function activate(context: vscode.ExtensionContext): void {
   tracker.start(root);
   apiDiagnostics.start();
 
-  // Initial audit state
   panelProvider.updateAudit(
     apiDiagnostics.getSummary(),
     apiDiagnostics.isAuditStale()
   );
 
-  // Tree view
   const treeView = vscode.window.createTreeView('claudeWorkflowPanel', {
     treeDataProvider: panelProvider,
     showCollapseAll: true,
   });
 
-  // ── Commands ────────────────────────────────────────────────────────────────
+  // ── Register all commands ────────────────────────────────────────────────
+
+  const skill = (name: string) => () => void runner.runSkill(name as Parameters<typeof runner.runSkill>[0]);
 
   const cmds: Array<[string, () => void | Promise<void>]> = [
-    // Existing workflow skills
-    ['claudeWorkflow.updateTests',  () => void runner.runSkill('update-tests')],
-    ['claudeWorkflow.updateUAT',    () => void runner.runSkill('update-uat')],
-    ['claudeWorkflow.regression',   () => void runner.runSkill('regression')],
-    ['claudeWorkflow.syncDesign',   () => void runner.runSkill('sync-design')],
+    // Workflow skills
+    ['claudeWorkflow.updateTests',     skill('update-tests')],
+    ['claudeWorkflow.updateUAT',       skill('update-uat')],
+    ['claudeWorkflow.regression',      skill('regression')],
+    ['claudeWorkflow.syncDesign',      skill('sync-design')],
+    ['claudeWorkflow.doneCheck',       skill('done-check')],
 
-    // New API skills
-    ['claudeWorkflow.auditApi',     () => void runner.runSkill('audit-api')],
-    ['claudeWorkflow.syncApiDocs',  () => void runner.runSkill('sync-api-docs')],
+    // API skills
+    ['claudeWorkflow.auditApi',        skill('audit-api')],
+    ['claudeWorkflow.syncApiDocs',     skill('sync-api-docs')],
+
+    // Capture skills
+    ['claudeWorkflow.logDecision',     skill('log-decision')],
+    ['claudeWorkflow.capturePattern',  skill('capture-pattern')],
+    ['claudeWorkflow.logFailure',      skill('log-failure')],
+    ['claudeWorkflow.logDebt',         skill('log-debt')],
+
+    // Generate skills
+    ['claudeWorkflow.releaseNotes',    skill('release-notes')],
+    ['claudeWorkflow.postReview',      skill('post-review')],
+    ['claudeWorkflow.updatePlaybooks', skill('update-playbooks')],
 
     // Utility
     ['claudeWorkflow.refresh', () => {
@@ -74,79 +82,53 @@ export function activate(context: vscode.ExtensionContext): void {
     }],
     ['claudeWorkflow.showPanel', () => void treeView.reveal(undefined as unknown as never)],
     ['claudeWorkflow.appendHistory', () => void appendHistoryEntry(root, tracker)],
-    ['claudeWorkflow.scaffoldApiSkills', () => void scaffoldApiSkills(root, runner)],
+    ['claudeWorkflow.scaffoldSkills', () => void scaffoldSkills(root)],
   ];
 
   for (const [id, handler] of cmds) {
     context.subscriptions.push(vscode.commands.registerCommand(id, handler));
   }
 
-  // Optional: remind after git commit if history looks stale
   watchForGitCommit(root, tracker, context);
-
   context.subscriptions.push(tracker, statusBar, treeView, apiDiagnostics);
 }
 
 export function deactivate(): void {}
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Scaffolding ──────────────────────────────────────────────────────────────
 
-function getWorkspaceRoot(): string | null {
-  const folders = vscode.workspace.workspaceFolders;
-  return folders && folders.length > 0 ? folders[0].uri.fsPath : null;
-}
-
-function hasClaudeSkills(root: string): boolean {
-  return fs.existsSync(path.join(root, '.claude', 'skills'));
-}
-
-/**
- * Write audit-api.md and sync-api-docs.md into .claude/skills/ if they
- * don't already exist. Offers to overwrite if they do.
- */
-async function scaffoldApiSkills(root: string, runner: SkillRunner): Promise<void> {
+async function scaffoldSkills(root: string): Promise<void> {
   const skillsDir = path.join(root, '.claude', 'skills');
+  if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
 
-  const skills: Array<{ name: string; content: string }> = [
-    { name: 'audit-api',     content: AUDIT_API_SKILL },
-    { name: 'sync-api-docs', content: SYNC_API_DOCS_SKILL },
-  ];
-
+  const templates = getScaffoldableTemplates();
   const created: string[] = [];
   const skipped: string[] = [];
 
-  for (const { name, content } of skills) {
+  for (const { name, content } of templates) {
     const dest = path.join(skillsDir, `${name}.md`);
-
     if (fs.existsSync(dest)) {
-      const overwrite = await vscode.window.showWarningMessage(
-        `.claude/skills/${name}.md already exists. Overwrite?`,
-        'Overwrite',
-        'Skip'
-      );
-      if (overwrite !== 'Overwrite') {
-        skipped.push(name);
-        continue;
-      }
+      skipped.push(name);
+      continue;
     }
-
     fs.writeFileSync(dest, content, 'utf8');
     created.push(name);
   }
 
-  const parts: string[] = [];
-  if (created.length) parts.push(`Created: ${created.join(', ')}`);
-  if (skipped.length) parts.push(`Skipped: ${skipped.join(', ')}`);
+  if (created.length === 0) {
+    void vscode.window.showInformationMessage(
+      `Claude Workflow: All ${skipped.length} skill files already exist.`
+    );
+    return;
+  }
 
-  void vscode.window.showInformationMessage(
-    `Claude Workflow: ${parts.join(' | ')}. Run "Audit API" to generate the first report.`
-  );
+  const msg = `Created ${created.length} skill files (${skipped.length} already existed).`;
+  void vscode.window.showInformationMessage(`Claude Workflow: ${msg}`);
 }
 
-async function appendHistoryEntry(
-  root: string,
-  tracker: HistoryTracker
-): Promise<void> {
+// ── Append history ──────────────────────────────────────────────────────────
+
+async function appendHistoryEntry(root: string, tracker: HistoryTracker): Promise<void> {
   const config = vscode.workspace.getConfiguration('claudeWorkflow');
   const historyFile = config.get<string>('historyFile', 'instruction-history.toon');
   const filePath = path.join(root, historyFile);
@@ -157,110 +139,95 @@ async function appendHistoryEntry(
   }
 
   let content: string;
-  try {
-    content = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    void vscode.window.showErrorMessage('Could not read instruction history file');
-    return;
-  }
+  try { content = fs.readFileSync(filePath, 'utf8'); }
+  catch { void vscode.window.showErrorMessage('Could not read instruction history file'); return; }
 
   const countMatch = content.match(/instructions\[(\d+)\]/);
   const currentCount = countMatch ? parseInt(countMatch[1], 10) : 0;
   const nextId = currentCount + 1;
 
   const instruction = await vscode.window.showInputBox({
-    prompt: 'Summarise what was done in this session (plain English)',
-    placeHolder: 'e.g. Fix maintenance allocation bug — building factor now displayed in form',
+    prompt: 'Summarise what was done (plain English)',
+    placeHolder: 'e.g. Add rate limiting to auth endpoints',
     ignoreFocusOut: true,
   });
   if (!instruction) return;
 
   const category = await vscode.window.showQuickPick(
-    [
-      'Feature addition',
-      'Bug fix',
-      'Enhancement',
-      'Update',
-      'Refactoring',
-      'Removal',
-      'Configuration',
-      'Change',
-      'Implementation',
-    ],
+    ['Feature addition', 'Bug fix', 'Enhancement', 'Update', 'Refactoring',
+     'Removal', 'Configuration', 'Change', 'Implementation'],
     { placeHolder: 'Select category', ignoreFocusOut: true }
   );
   if (!category) return;
 
   const actions = await vscode.window.showInputBox({
     prompt: 'Key actions taken (comma-separated)',
-    placeHolder: 'e.g. Updated server/routes/maintenance.ts, Fixed bug in AllocationForm',
+    placeHolder: 'e.g. Updated server/routes/auth.ts, Added rate-limit middleware',
     ignoreFocusOut: true,
   });
   if (actions === undefined) return;
 
   const actionList = actions.split(',').map(a => a.trim()).filter(Boolean);
-
   const now = new Date();
   const iso = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const date = iso.slice(0, 10);
 
   const entry = [
     `  -`,
     `    id: ${nextId}`,
     `    dateTime: "${iso}"`,
-    `    date: ${date}`,
+    `    date: ${iso.slice(0, 10)}`,
     `    type: user_instruction`,
     `    instruction: "${instruction.replace(/"/g, '\\"')}"`,
     `    category: ${category}`,
     `    actionsTaken[${actionList.length}]: ${actionList.join(',')}`,
   ].join('\n');
 
-  const updated =
-    content.replace(`instructions[${currentCount}]:`, `instructions[${nextId}]:`) +
-    '\n' + entry + '\n';
+  const updated = content
+    .replace(`instructions[${currentCount}]:`, `instructions[${nextId}]:`)
+    + '\n' + entry + '\n';
 
   try {
     fs.writeFileSync(filePath, updated, 'utf8');
     tracker.refresh();
-    void vscode.window.showInformationMessage(
-      `Appended entry #${nextId} to instruction history`
-    );
+    void vscode.window.showInformationMessage(`Appended entry #${nextId} to instruction history`);
   } catch {
     void vscode.window.showErrorMessage('Failed to write instruction history');
   }
 }
 
-function watchForGitCommit(
-  root: string,
-  tracker: HistoryTracker,
-  context: vscode.ExtensionContext
-): void {
+// ── Git commit watcher ──────────────────────────────────────────────────────
+
+function watchForGitCommit(root: string, tracker: HistoryTracker, ctx: vscode.ExtensionContext): void {
   const config = vscode.workspace.getConfiguration('claudeWorkflow');
   if (!config.get<boolean>('autoRemindAfterCommit', true)) return;
   if (!fs.existsSync(path.join(root, '.git'))) return;
 
-  const pattern = new vscode.RelativePattern(path.join(root, '.git'), 'COMMIT_EDITMSG');
-  const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(path.join(root, '.git'), 'COMMIT_EDITMSG')
+  );
   watcher.onDidChange(() => {
     setTimeout(() => {
       tracker.refresh();
-      const state = tracker.getState();
-      if (state.isStale) {
+      if (tracker.getState().isStale) {
         void vscode.window
           .showWarningMessage(
-            'Claude Workflow: instruction-history.toon may need updating after this commit.',
-            'Append Entry',
-            'Dismiss'
+            'Claude Workflow: instruction-history.toon may need updating.',
+            'Append Entry', 'Dismiss'
           )
-          .then(choice => {
-            if (choice === 'Append Entry') {
-              void vscode.commands.executeCommand('claudeWorkflow.appendHistory');
-            }
-          });
+          .then(c => { if (c === 'Append Entry') void vscode.commands.executeCommand('claudeWorkflow.appendHistory'); });
       }
     }, 500);
   });
+  ctx.subscriptions.push(watcher);
+}
 
-  context.subscriptions.push(watcher);
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function getWorkspaceRoot(): string | null {
+  const f = vscode.workspace.workspaceFolders;
+  return f && f.length > 0 ? f[0].uri.fsPath : null;
+}
+
+function hasClaudeSkills(root: string): boolean {
+  return fs.existsSync(path.join(root, '.claude', 'skills'));
 }
