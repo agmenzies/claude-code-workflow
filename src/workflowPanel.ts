@@ -3,8 +3,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { HistoryState } from './historyTracker';
 import { SkillName, SkillRunner } from './skillRunner';
+import { AuditSummary } from './apiAuditor';
 
-type ItemKind = 'section' | 'checklist' | 'skill' | 'doc';
+type ItemKind = 'section' | 'checklist' | 'skill' | 'doc' | 'api-stat';
 
 interface ChecklistItem {
   label: string;
@@ -19,14 +20,14 @@ class WorkflowTreeItem extends vscode.TreeItem {
     collapsibleState: vscode.TreeItemCollapsibleState,
     options?: {
       description?: string;
-      tooltip?: string;
+      tooltip?: string | vscode.MarkdownString;
       command?: vscode.Command;
       iconPath?: vscode.ThemeIcon;
       contextValue?: string;
     }
   ) {
     super(label, collapsibleState);
-    if (options?.description) this.description = options.description;
+    if (options?.description !== undefined) this.description = options.description;
     if (options?.tooltip) this.tooltip = options.tooltip;
     if (options?.command) this.command = options.command;
     if (options?.iconPath) this.iconPath = options.iconPath;
@@ -48,6 +49,9 @@ export class WorkflowPanelProvider
     filePath: null,
   };
 
+  private auditSummary: AuditSummary | null = null;
+  private auditStale = true;
+
   constructor(
     private readonly workspaceRoot: string,
     private readonly runner: SkillRunner
@@ -55,6 +59,12 @@ export class WorkflowPanelProvider
 
   updateHistory(state: HistoryState): void {
     this.historyState = state;
+    this._onDidChangeTreeData.fire();
+  }
+
+  updateAudit(summary: AuditSummary | null, stale: boolean): void {
+    this.auditSummary = summary;
+    this.auditStale = stale;
     this._onDidChangeTreeData.fire();
   }
 
@@ -67,24 +77,18 @@ export class WorkflowPanelProvider
   }
 
   getChildren(element?: WorkflowTreeItem): WorkflowTreeItem[] {
-    if (!element) {
-      return this.getRootItems();
-    }
+    if (!element) return this.getRootItems();
 
-    const label = element.label as string;
-
-    if (label === 'Session Checklist') {
-      return this.getChecklistItems();
+    switch (element.label as string) {
+      case 'Session Checklist': return this.getChecklistItems();
+      case 'Skills':            return this.getSkillItems();
+      case 'API Health':        return this.getApiHealthItems();
+      case 'Living Docs':       return this.getDocItems();
+      default:                  return [];
     }
-    if (label === 'Skills') {
-      return this.getSkillItems();
-    }
-    if (label === 'Living Docs') {
-      return this.getDocItems();
-    }
-
-    return [];
   }
+
+  // ── Sections ──────────────────────────────────────────────────────────────
 
   private getRootItems(): WorkflowTreeItem[] {
     return [
@@ -101,6 +105,17 @@ export class WorkflowPanelProvider
         { iconPath: new vscode.ThemeIcon('tools') }
       ),
       new WorkflowTreeItem(
+        'API Health',
+        'section',
+        vscode.TreeItemCollapsibleState.Expanded,
+        {
+          iconPath: new vscode.ThemeIcon(
+            this.apiHealthIcon(),
+            this.apiHealthColour()
+          ),
+        }
+      ),
+      new WorkflowTreeItem(
         'Living Docs',
         'section',
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -108,6 +123,8 @@ export class WorkflowPanelProvider
       ),
     ];
   }
+
+  // ── Session checklist ──────────────────────────────────────────────────────
 
   private getChecklistItems(): WorkflowTreeItem[] {
     const checks: ChecklistItem[] = [
@@ -122,15 +139,23 @@ export class WorkflowPanelProvider
       },
       {
         label: 'Tests updated',
-        checked: this.fileExists('server/__tests__') || this.fileExists('src/__tests__'),
+        checked:
+          this.fileExists('server/__tests__') ||
+          this.fileExists('src/__tests__') ||
+          this.fileExists('__tests__'),
       },
       {
         label: 'UAT spec current',
-        checked: this.fileExistsAndRecent('UAT.md'),
+        checked: this.fileExistsAndRecent('UAT.md', 7),
       },
       {
         label: 'Design standards synced',
         checked: this.fileExists('design-standards.md'),
+      },
+      {
+        label: 'API audit current',
+        checked: !this.auditStale && this.auditSummary !== null,
+        command: 'claudeWorkflow.auditApi',
       },
     ];
 
@@ -145,27 +170,31 @@ export class WorkflowPanelProvider
         vscode.TreeItemCollapsibleState.None,
         {
           iconPath: icon,
-          command: c.command
-            ? { command: c.command, title: c.label }
-            : undefined,
+          command: c.command ? { command: c.command, title: c.label } : undefined,
         }
       );
     });
   }
 
+  // ── Skills ────────────────────────────────────────────────────────────────
+
   private getSkillItems(): WorkflowTreeItem[] {
     const skills: Array<{ skill: SkillName; icon: string; key: string }> = [
-      { skill: 'update-tests', icon: 'beaker', key: 'skill-update-tests' },
-      { skill: 'update-uat', icon: 'checklist', key: 'skill-update-uat' },
-      { skill: 'regression', icon: 'run-all', key: 'skill-regression' },
-      { skill: 'sync-design', icon: 'symbol-color', key: 'skill-sync-design' },
+      { skill: 'update-tests',  icon: 'beaker',       key: 'skill-update-tests' },
+      { skill: 'update-uat',    icon: 'checklist',    key: 'skill-update-uat' },
+      { skill: 'regression',    icon: 'run-all',      key: 'skill-regression' },
+      { skill: 'sync-design',   icon: 'symbol-color', key: 'skill-sync-design' },
+      { skill: 'audit-api',     icon: 'shield',       key: 'skill-audit-api' },
+      { skill: 'sync-api-docs', icon: 'file-code',    key: 'skill-sync-api-docs' },
     ];
 
     const commandMap: Record<SkillName, string> = {
-      'update-tests': 'claudeWorkflow.updateTests',
-      'update-uat': 'claudeWorkflow.updateUAT',
-      'regression': 'claudeWorkflow.regression',
-      'sync-design': 'claudeWorkflow.syncDesign',
+      'update-tests':  'claudeWorkflow.updateTests',
+      'update-uat':    'claudeWorkflow.updateUAT',
+      'regression':    'claudeWorkflow.regression',
+      'sync-design':   'claudeWorkflow.syncDesign',
+      'audit-api':     'claudeWorkflow.auditApi',
+      'sync-api-docs': 'claudeWorkflow.syncApiDocs',
     };
 
     return skills.map(({ skill, icon, key }) => {
@@ -176,27 +205,96 @@ export class WorkflowPanelProvider
         'skill',
         vscode.TreeItemCollapsibleState.None,
         {
-          description: exists ? '' : '(skill not found)',
-          tooltip: meta.description,
+          description: exists ? '' : '(not scaffolded)',
+          tooltip: exists
+            ? meta.description
+            : `${meta.description}\n\nRun "Scaffold API Skills" to create this skill file.`,
           iconPath: new vscode.ThemeIcon(icon),
           contextValue: key,
           command: exists
-            ? {
-                command: commandMap[skill],
-                title: meta.label,
-              }
-            : undefined,
+            ? { command: commandMap[skill], title: meta.label }
+            : { command: 'claudeWorkflow.scaffoldApiSkills', title: 'Scaffold Skills' },
         }
       );
     });
   }
 
+  // ── API Health ────────────────────────────────────────────────────────────
+
+  private getApiHealthItems(): WorkflowTreeItem[] {
+    if (!this.auditSummary) {
+      return [
+        new WorkflowTreeItem(
+          this.auditStale && this.fileExists('.claude/api-audit.json')
+            ? 'Audit results are stale (>24h)'
+            : 'No audit yet — run Audit API',
+          'api-stat',
+          vscode.TreeItemCollapsibleState.None,
+          {
+            iconPath: new vscode.ThemeIcon('warning'),
+            command: { command: 'claudeWorkflow.auditApi', title: 'Run Audit' },
+          }
+        ),
+      ];
+    }
+
+    const s = this.auditSummary;
+    const coveragePct = s.totalRoutes > 0
+      ? Math.round((s.documented / s.totalRoutes) * 100)
+      : 100;
+    const authPct = s.totalRoutes > 0
+      ? Math.round((s.withAuth / s.totalRoutes) * 100)
+      : 100;
+    const ratePct = s.totalRoutes > 0
+      ? Math.round((s.withRateLimit / s.totalRoutes) * 100)
+      : 100;
+
+    const stat = (
+      label: string,
+      pct: number,
+      count: number,
+      total: number,
+      goodThreshold: number
+    ) => {
+      const icon =
+        pct >= goodThreshold
+          ? new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'))
+          : pct >= goodThreshold - 20
+          ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('list.warningForeground'))
+          : new vscode.ThemeIcon('error', new vscode.ThemeColor('list.errorForeground'));
+
+      return new WorkflowTreeItem(label, 'api-stat', vscode.TreeItemCollapsibleState.None, {
+        description: `${count} / ${total} (${pct}%)`,
+        iconPath: icon,
+      });
+    };
+
+    return [
+      stat('Swagger coverage',    coveragePct, s.documented,      s.totalRoutes, 90),
+      stat('Auth applied',        authPct,     s.withAuth,        s.totalRoutes, 95),
+      stat('Rate limiting',       ratePct,     s.withRateLimit,   s.totalRoutes, 80),
+      new WorkflowTreeItem(
+        'Re-run audit',
+        'api-stat',
+        vscode.TreeItemCollapsibleState.None,
+        {
+          iconPath: new vscode.ThemeIcon('refresh'),
+          command: { command: 'claudeWorkflow.auditApi', title: 'Audit API' },
+          description: this.auditStale ? '(stale)' : '',
+        }
+      ),
+    ];
+  }
+
+  // ── Living docs ───────────────────────────────────────────────────────────
+
   private getDocItems(): WorkflowTreeItem[] {
     const docs = [
       { file: 'instruction-history.toon', label: 'Instruction History', icon: 'history' },
-      { file: 'UAT.md', label: 'UAT Spec', icon: 'checklist' },
-      { file: 'design-standards.md', label: 'Design Standards', icon: 'symbol-color' },
-      { file: 'business-rules.md', label: 'Business Rules', icon: 'law' },
+      { file: 'UAT.md',                   label: 'UAT Spec',            icon: 'checklist' },
+      { file: 'design-standards.md',      label: 'Design Standards',    icon: 'symbol-color' },
+      { file: 'business-rules.md',        label: 'Business Rules',      icon: 'law' },
+      { file: '.claude/api-audit.json',   label: 'API Audit Results',   icon: 'shield' },
     ];
 
     return docs
@@ -219,17 +317,33 @@ export class WorkflowPanelProvider
       });
   }
 
+  // ── Utilities ─────────────────────────────────────────────────────────────
+
+  private apiHealthIcon(): string {
+    if (!this.auditSummary) return 'shield';
+    const s = this.auditSummary;
+    const issues = s.totalRoutes - s.withAuth + (s.totalRoutes - s.documented);
+    return issues === 0 ? 'shield-check' : 'shield';
+  }
+
+  private apiHealthColour(): vscode.ThemeColor | undefined {
+    if (!this.auditSummary) return new vscode.ThemeColor('list.warningForeground');
+    const s = this.auditSummary;
+    if (s.withAuth < s.totalRoutes) return new vscode.ThemeColor('list.errorForeground');
+    if (s.documented < s.totalRoutes) return new vscode.ThemeColor('list.warningForeground');
+    return new vscode.ThemeColor('testing.iconPassed');
+  }
+
   private fileExists(rel: string): boolean {
     return fs.existsSync(path.join(this.workspaceRoot, rel));
   }
 
-  private fileExistsAndRecent(rel: string): boolean {
+  private fileExistsAndRecent(rel: string, days: number): boolean {
     const full = path.join(this.workspaceRoot, rel);
     if (!fs.existsSync(full)) return false;
     try {
       const stat = fs.statSync(full);
-      const ageMs = Date.now() - stat.mtime.getTime();
-      return ageMs < 7 * 24 * 60 * 60 * 1000; // within 7 days
+      return Date.now() - stat.mtime.getTime() < days * 24 * 60 * 60 * 1000;
     } catch {
       return false;
     }

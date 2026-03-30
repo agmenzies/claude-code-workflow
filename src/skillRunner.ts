@@ -2,7 +2,13 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type SkillName = 'update-tests' | 'update-uat' | 'regression' | 'sync-design';
+export type SkillName =
+  | 'update-tests'
+  | 'update-uat'
+  | 'regression'
+  | 'sync-design'
+  | 'audit-api'
+  | 'sync-api-docs';
 
 const SKILL_META: Record<SkillName, { label: string; description: string }> = {
   'update-tests': {
@@ -20,6 +26,14 @@ const SKILL_META: Record<SkillName, { label: string; description: string }> = {
   'sync-design': {
     label: 'Sync Design Standards',
     description: 'Scan codebase and update design-standards.md',
+  },
+  'audit-api': {
+    label: 'Audit API',
+    description: 'Check all routes for auth, rate limiting, validation, and Swagger coverage — writes .claude/api-audit.json',
+  },
+  'sync-api-docs': {
+    label: 'Sync API Docs',
+    description: 'Generate or update Swagger/OpenAPI documentation for undocumented routes',
   },
 };
 

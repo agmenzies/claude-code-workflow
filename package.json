@@ -1,8 +1,8 @@
 {
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
-  "description": "Session checklist, skill runner, and living docs for Claude Code agent projects",
-  "version": "0.1.0",
+  "description": "Session checklist, skill runner, API auditing, and living docs for Claude Code agent projects",
+  "version": "0.2.0",
   "publisher": "agmenzies",
   "repository": {
     "type": "git",
@@ -11,8 +11,8 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
-  "keywords": ["claude", "claude-code", "ai", "agents", "workflow"],
+  "categories": ["Other", "Linters"],
+  "keywords": ["claude", "claude-code", "ai", "agents", "workflow", "api", "openapi", "swagger"],
   "activationEvents": [
     "workspaceContains:.claude/skills"
   ],
@@ -42,6 +42,24 @@
         "title": "Sync Design Standards",
         "category": "Claude Workflow",
         "icon": "$(symbol-color)"
+      },
+      {
+        "command": "claudeWorkflow.auditApi",
+        "title": "Audit API",
+        "category": "Claude Workflow",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "claudeWorkflow.syncApiDocs",
+        "title": "Sync API Docs",
+        "category": "Claude Workflow",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "claudeWorkflow.scaffoldApiSkills",
+        "title": "Scaffold API Skills",
+        "category": "Claude Workflow",
+        "icon": "$(wand)"
       },
       {
         "command": "claudeWorkflow.appendHistory",
@@ -93,6 +111,16 @@
           "command": "claudeWorkflow.syncDesign",
           "when": "view == claudeWorkflowPanel && viewItem == skill-sync-design",
           "group": "inline"
+        },
+        {
+          "command": "claudeWorkflow.auditApi",
+          "when": "view == claudeWorkflowPanel && viewItem == skill-audit-api",
+          "group": "inline"
+        },
+        {
+          "command": "claudeWorkflow.syncApiDocs",
+          "when": "view == claudeWorkflowPanel && viewItem == skill-sync-api-docs",
+          "group": "inline"
         }
       ]
     },
@@ -107,6 +135,12 @@
         "command": "claudeWorkflow.updateTests",
         "key": "ctrl+shift+alt+t",
         "mac": "cmd+shift+alt+t",
+        "when": "claudeWorkflow.active"
+      },
+      {
+        "command": "claudeWorkflow.auditApi",
+        "key": "ctrl+shift+alt+a",
+        "mac": "cmd+shift+alt+a",
         "when": "claudeWorkflow.active"
       }
     ],
@@ -132,6 +166,44 @@
           "type": "number",
           "default": 8,
           "description": "Hours since last history update before the status bar turns amber"
+        },
+        "claudeWorkflow.routeGlobs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "server/routes/**/*.ts",
+            "src/routes/**/*.ts",
+            "routes/**/*.ts",
+            "app/routes/**/*.ts",
+            "server/routes/**/*.js"
+          ],
+          "description": "Glob patterns for route files to scan for API coverage"
+        },
+        "claudeWorkflow.swaggerGlobs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "server/swagger/**/*.yaml",
+            "server/swagger/**/*.yml",
+            "server/swagger/**/*.json",
+            "swagger/**/*.yaml",
+            "swagger/**/*.yml",
+            "openapi/**/*.yaml",
+            "docs/api/**/*.yaml"
+          ],
+          "description": "Glob patterns for Swagger/OpenAPI documentation files"
+        },
+        "claudeWorkflow.publicRoutePrefixes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "/health",
+            "/api/health",
+            "/api/public",
+            "/api/auth/login",
+            "/api/auth/register"
+          ],
+          "description": "Route path prefixes that are intentionally public — auth not required, shown as info not warning"
         }
       }
     }
