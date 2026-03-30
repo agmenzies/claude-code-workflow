@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { HistoryState } from './historyTracker';
 import { SkillName, SkillRunner, SkillCategory, SKILL_CATEGORIES } from './skillRunner';
 import { AuditSummary } from './apiAuditor';
+import type { ProjectProfile } from './envAssessment';
 
 type ItemKind = 'section' | 'category' | 'checklist' | 'skill' | 'doc' | 'api-stat';
 
@@ -59,11 +60,17 @@ export class WorkflowPanelProvider
   };
   private auditSummary: AuditSummary | null = null;
   private auditStale = true;
+  private profile: ProjectProfile | null = null;
 
   constructor(
     private readonly workspaceRoot: string,
     private readonly runner: SkillRunner
   ) {}
+
+  setProfile(profile: ProjectProfile): void {
+    this.profile = profile;
+    this._onDidChangeTreeData.fire();
+  }
 
   updateHistory(state: HistoryState): void {
     this.historyState = state;
@@ -123,12 +130,12 @@ export class WorkflowPanelProvider
 
   private getChecklistItems(): WorkflowTreeItem[] {
     const items: Array<{ label: string; ok: boolean; cmd?: string }> = [
-      { label: 'History updated',       ok: !this.historyState.isStale,               cmd: 'claudeWorkflow.appendHistory' },
-      { label: 'Tests updated',         ok: this.anyTestDir() },
-      { label: 'UAT spec current',      ok: this.recentFile('UAT.md', 7) },
-      { label: 'API audit current',     ok: !this.auditStale && !!this.auditSummary,  cmd: 'claudeWorkflow.auditApi' },
-      { label: 'Design standards synced',ok: this.fileExists('design-standards.md') },
-      { label: 'Definition of Done run', ok: this.recentFile('.claude/dod-result.md', 1), cmd: 'claudeWorkflow.doneCheck' },
+      { label: 'History updated',        ok: !this.historyState.isStale,              cmd: 'claudeWorkflow.appendHistory' },
+      { label: 'Tests updated',          ok: this.hasTests() },
+      { label: 'UAT spec current',       ok: this.docRecentByName('UAT.md', 7) },
+      { label: 'API audit current',      ok: !this.auditStale && !!this.auditSummary, cmd: 'claudeWorkflow.auditApi' },
+      { label: 'Design standards synced', ok: this.docExists('design-standards.md') },
+      { label: 'Definition of Done run',  ok: this.recentFile('.claude/dod-result.md', 1), cmd: 'claudeWorkflow.doneCheck' },
     ];
 
     return items.map(c => {
@@ -221,24 +228,53 @@ export class WorkflowPanelProvider
   // ── Living docs ───────────────────────────────────────────────────────────
 
   private getDocItems(): WorkflowTreeItem[] {
-    const docs = [
-      { file: 'instruction-history.toon', label: 'Instruction History',  icon: 'history' },
-      { file: 'UAT.md',                   label: 'UAT Spec',             icon: 'checklist' },
-      { file: 'design-standards.md',      label: 'Design Standards',     icon: 'symbol-color' },
-      { file: 'decision-log.md',          label: 'Decision Log',         icon: 'milestone' },
-      { file: 'patterns-library.md',      label: 'Patterns Library',     icon: 'extensions' },
-      { file: 'failure-modes.md',         label: 'Failure Modes',        icon: 'bug' },
-      { file: 'tech-debt.md',             label: 'Tech Debt',            icon: 'flame' },
-      { file: 'release-notes.md',         label: 'Release Notes',        icon: 'tag' },
-      { file: 'agent-playbooks.md',       label: 'Agent Playbooks',      icon: 'robot' },
-      { file: 'post-reviews.md',          label: 'Post-Reviews',         icon: 'comment-discussion' },
-      { file: '.claude/api-audit.json',   label: 'API Audit Results',    icon: 'shield' },
-      { file: 'business-rules.md',        label: 'Business Rules',       icon: 'law' },
-    ];
+    if (!this.profile) return this.getLegacyDocItems();
 
-    return docs.filter(d => this.fileExists(d.file)).map(d =>
-      new WorkflowTreeItem(d.label, 'doc',
+    const items: WorkflowTreeItem[] = [];
+
+    // Living docs discovered by assessment (show found ones)
+    for (const doc of this.profile.livingDocs) {
+      if (!doc.actualPath) continue;
+      const suffix = doc.status === 'equivalent' ? ` (${path.basename(doc.actualPath)})` : '';
+      const altSuffix = doc.status === 'alternative' ? ' (agents dir)' : '';
+      items.push(new WorkflowTreeItem(doc.label, 'doc',
         vscode.TreeItemCollapsibleState.None,
+        {
+          description: suffix || altSuffix || '',
+          iconPath: new vscode.ThemeIcon(doc.icon),
+          command: { command: 'vscode.open', title: `Open ${doc.label}`,
+            arguments: [vscode.Uri.file(path.join(this.workspaceRoot, doc.actualPath))] },
+        }));
+    }
+
+    // Extra docs discovered by assessment (project-specific docs)
+    for (const doc of this.profile.extraDocs) {
+      if (!doc.actualPath) continue;
+      items.push(new WorkflowTreeItem(doc.label, 'doc',
+        vscode.TreeItemCollapsibleState.None,
+        {
+          description: '(discovered)',
+          iconPath: new vscode.ThemeIcon(doc.icon),
+          command: { command: 'vscode.open', title: `Open ${doc.label}`,
+            arguments: [vscode.Uri.file(path.join(this.workspaceRoot, doc.actualPath))] },
+        }));
+    }
+
+    return items;
+  }
+
+  /** Fallback when profile hasn't loaded yet. */
+  private getLegacyDocItems(): WorkflowTreeItem[] {
+    const docs = [
+      { file: 'instruction-history.toon', label: 'Instruction History', icon: 'history' },
+      { file: 'UAT.md', label: 'UAT Spec', icon: 'checklist' },
+      { file: 'design-standards.md', label: 'Design Standards', icon: 'symbol-color' },
+      { file: 'decision-log.md', label: 'Decision Log', icon: 'milestone' },
+      { file: 'business-rules.md', label: 'Business Rules', icon: 'law' },
+      { file: '.claude/api-audit.json', label: 'API Audit Results', icon: 'shield' },
+    ];
+    return docs.filter(d => this.fileExists(d.file)).map(d =>
+      new WorkflowTreeItem(d.label, 'doc', vscode.TreeItemCollapsibleState.None,
         { iconPath: new vscode.ThemeIcon(d.icon),
           command: { command: 'vscode.open', title: `Open ${d.label}`,
             arguments: [vscode.Uri.file(path.join(this.workspaceRoot, d.file))] } })
@@ -273,8 +309,29 @@ export class WorkflowPanelProvider
     } catch { return false; }
   }
 
-  private anyTestDir(): boolean {
+  /** Profile-aware test directory check. Falls back to legacy glob if no profile. */
+  private hasTests(): boolean {
+    if (this.profile) return this.profile.testDirectories.length > 0;
     return ['server/__tests__', 'src/__tests__', '__tests__', 'test', 'tests']
       .some(d => this.fileExists(d));
+  }
+
+  /** Check if a living doc exists — uses profile equivalence if available. */
+  private docExists(expectedName: string): boolean {
+    if (this.profile) {
+      const doc = this.profile.livingDocs.find(d => d.expectedName === expectedName);
+      return doc?.status === 'present' || doc?.status === 'equivalent' || doc?.status === 'alternative';
+    }
+    return this.fileExists(expectedName);
+  }
+
+  /** Check if a living doc was recently updated — resolves actual path via profile. */
+  private docRecentByName(expectedName: string, days: number): boolean {
+    if (this.profile) {
+      const doc = this.profile.livingDocs.find(d => d.expectedName === expectedName);
+      if (!doc?.actualPath) return false;
+      return this.recentFile(doc.actualPath, days);
+    }
+    return this.recentFile(expectedName, days);
   }
 }

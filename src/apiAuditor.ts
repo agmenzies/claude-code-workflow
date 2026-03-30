@@ -68,6 +68,9 @@ const SWAGGER_PATH_YAML_RE = /^  (\/[^\s:]+)\s*:/gm;
 // Swagger JSON path keys
 const SWAGGER_PATH_JSON_RE = /"(\/[^"]+)"\s*:/g;
 
+// TypeScript code-first swagger: string literals that look like API paths
+const TS_PATH_RE = /['"`](\/(?:api\/)?[a-z][^'"`]*?)['"`]\s*:/gi;
+
 // ── Quick scan ────────────────────────────────────────────────────────────────
 
 /**
@@ -124,8 +127,12 @@ export async function findRoutes(workspaceRoot: string): Promise<RouteRef[]> {
 
 /**
  * Extract documented paths from all Swagger / OpenAPI files.
+ * When swaggerFormat is 'typescript', also scans .ts/.js files for path string literals.
  */
-export async function findSwaggerPaths(workspaceRoot: string): Promise<Set<string>> {
+export async function findSwaggerPaths(
+  workspaceRoot: string,
+  swaggerFormat?: string
+): Promise<Set<string>> {
   const config = vscode.workspace.getConfiguration('claudeWorkflow');
   const globs = config.get<string[]>('swaggerGlobs', [
     'server/swagger/**/*.yaml',
@@ -137,6 +144,11 @@ export async function findSwaggerPaths(workspaceRoot: string): Promise<Set<strin
     'docs/api/**/*.yaml',
   ]);
 
+  // Add TypeScript globs when swagger is code-first
+  if (swaggerFormat === 'typescript') {
+    globs.push('server/swagger/**/*.ts', 'server/swagger/**/*.js', 'swagger/**/*.ts');
+  }
+
   const documented = new Set<string>();
 
   for (const pattern of globs) {
@@ -147,9 +159,17 @@ export async function findSwaggerPaths(workspaceRoot: string): Promise<Set<strin
 
     for (const uri of uris) {
       const content = fs.readFileSync(uri.fsPath, 'utf8');
-      const isJson = uri.fsPath.endsWith('.json');
+      const ext = path.extname(uri.fsPath);
 
-      const re = isJson ? SWAGGER_PATH_JSON_RE : SWAGGER_PATH_YAML_RE;
+      let re: RegExp;
+      if (ext === '.ts' || ext === '.js') {
+        re = TS_PATH_RE;
+      } else if (ext === '.json') {
+        re = SWAGGER_PATH_JSON_RE;
+      } else {
+        re = SWAGGER_PATH_YAML_RE;
+      }
+
       re.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = re.exec(content)) !== null) {
@@ -166,11 +186,12 @@ export async function findSwaggerPaths(workspaceRoot: string): Promise<Set<strin
  * Returns issues only for routes without Swagger documentation.
  */
 export async function quickCoverageScan(
-  workspaceRoot: string
+  workspaceRoot: string,
+  swaggerFormat?: string
 ): Promise<ApiIssue[]> {
   const [routes, swaggerPaths] = await Promise.all([
     findRoutes(workspaceRoot),
-    findSwaggerPaths(workspaceRoot),
+    findSwaggerPaths(workspaceRoot, swaggerFormat),
   ]);
 
   const config = vscode.workspace.getConfiguration('claudeWorkflow');

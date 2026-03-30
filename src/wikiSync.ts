@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AzureDevOpsClient, AdoConfig } from './azureDevOps';
+import type { ProjectProfile } from './envAssessment';
 
 interface DocMapping {
   localFile: string;       // relative to workspace root
@@ -38,11 +39,35 @@ export interface SyncResult {
 
 export class WikiSyncProvider {
   private client: AzureDevOpsClient | null = null;
+  private profile: ProjectProfile | null = null;
 
   constructor(
     private readonly workspaceRoot: string,
     private readonly secrets: vscode.SecretStorage
   ) {}
+
+  setProfile(profile: ProjectProfile): void {
+    this.profile = profile;
+  }
+
+  /** Generate doc mappings from profile (uses actual discovered paths) or fall back to defaults. */
+  private getDocMappings(): DocMapping[] {
+    if (!this.profile) return DOC_MAPPINGS;
+
+    const mappings: DocMapping[] = [];
+    for (const doc of this.profile.livingDocs) {
+      if (doc.actualPath && doc.status !== 'missing') {
+        mappings.push({ localFile: doc.actualPath, wikiPath: doc.label, label: doc.label });
+      }
+    }
+    // Also include extra docs discovered by assessment
+    for (const doc of this.profile.extraDocs) {
+      if (doc.actualPath) {
+        mappings.push({ localFile: doc.actualPath, wikiPath: doc.label, label: doc.label });
+      }
+    }
+    return mappings;
+  }
 
   async syncAll(): Promise<SyncResult> {
     const config = this.getAdoConfig();
@@ -73,7 +98,8 @@ export class WikiSyncProvider {
         cancellable: false,
       },
       async progress => {
-        const existingDocs = DOC_MAPPINGS.filter(d =>
+        const allMappings = this.getDocMappings();
+        const existingDocs = allMappings.filter(d =>
           fs.existsSync(path.join(this.workspaceRoot, d.localFile))
         );
 
@@ -105,7 +131,7 @@ export class WikiSyncProvider {
         }
 
         // Skipped = defined but file doesn't exist locally
-        const missing = DOC_MAPPINGS.filter(d =>
+        const missing = allMappings.filter(d =>
           !fs.existsSync(path.join(this.workspaceRoot, d.localFile))
         );
         result.skipped = missing.map(d => d.label);

@@ -6,16 +6,18 @@ import { SkillRunner } from './skillRunner';
 import { WorkflowPanelProvider } from './workflowPanel';
 import { WorkflowStatusBar } from './statusBar';
 import { ApiDiagnosticsProvider } from './apiDiagnostics';
-import { getScaffoldableTemplates } from './skillTemplates';
+import { getScaffoldableForProfile, getScaffoldableTemplates } from './skillTemplates';
 import { WikiSyncProvider, SyncResult } from './wikiSync';
 import { WorkItemSyncProvider } from './workItemSync';
 import { SetupWizard } from './setupWizard';
+import { getProfile, invalidateProfile, getCachedProfile, ProjectProfile } from './envAssessment';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getWorkspaceRoot();
   if (!root) return;
 
-  if (!hasClaudeSkills(root)) return;
+  // Activate on .claude/skills OR .claude/agents (some projects have agents but not skills yet)
+  if (!hasClaudeStructure(root)) return;
 
   void vscode.commands.executeCommand('setContext', 'claudeWorkflow.active', true);
 
@@ -27,7 +29,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const apiDiagnostics = new ApiDiagnosticsProvider(root);
   const wikiSync = new WikiSyncProvider(root, context.secrets);
   const workItemSync = new WorkItemSyncProvider(root, context.secrets);
-  const setupWizard = new SetupWizard(context, root);
 
   // Wire history → status bar + panel
   tracker.onDidChange(state => {
@@ -42,11 +43,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
   tracker.start(root);
   apiDiagnostics.start();
+  panelProvider.updateAudit(apiDiagnostics.getSummary(), apiDiagnostics.isAuditStale());
 
-  panelProvider.updateAudit(
-    apiDiagnostics.getSummary(),
-    apiDiagnostics.isAuditStale()
-  );
+  // ── Run environment assessment (non-blocking) ─────────────────────────────
+
+  const profilePromise = getProfile(root);
+  profilePromise.then(profile => {
+    panelProvider.setProfile(profile);
+    apiDiagnostics.setProfile(profile);
+    wikiSync.setProfile(profile);
+  });
+
+  // Pass profile promise to wizard so it can show assessment results
+  const setupWizard = new SetupWizard(context, root, profilePromise);
 
   const treeView = vscode.window.createTreeView('claudeWorkflowPanel', {
     treeDataProvider: panelProvider,
@@ -87,12 +96,18 @@ export function activate(context: vscode.ExtensionContext): void {
     // Utility
     ['claudeWorkflow.refresh', () => {
       tracker.refresh();
-      panelProvider.refresh();
+      invalidateProfile();
+      void getProfile(root).then(profile => {
+        panelProvider.setProfile(profile);
+        apiDiagnostics.setProfile(profile);
+        wikiSync.setProfile(profile);
+        panelProvider.refresh();
+      });
       void apiDiagnostics.refresh();
     }],
     ['claudeWorkflow.showPanel', () => void treeView.reveal(undefined as unknown as never)],
     ['claudeWorkflow.appendHistory', () => void appendHistoryEntry(root, tracker)],
-    ['claudeWorkflow.scaffoldSkills', () => void scaffoldSkills(root)],
+    ['claudeWorkflow.scaffoldSkills', () => void scaffoldSkillsAdaptive(root)],
     ['claudeWorkflow.openSetup', () => setupWizard.open()],
   ];
 
@@ -103,7 +118,7 @@ export function activate(context: vscode.ExtensionContext): void {
   watchForGitCommit(root, tracker, context);
   context.subscriptions.push(tracker, statusBar, treeView, apiDiagnostics);
 
-  // Auto-show wizard on first activation in this workspace
+  // Auto-show wizard on first activation
   const hasSeenWizard = context.workspaceState.get<boolean>('hasSeenSetupWizard', false);
   if (!hasSeenWizard) {
     void context.workspaceState.update('hasSeenSetupWizard', true);
@@ -113,22 +128,30 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {}
 
-// ── Scaffolding ──────────────────────────────────────────────────────────────
+// ── Adaptive scaffolding ────────────────────────────────────────────────────
 
-async function scaffoldSkills(root: string): Promise<void> {
+async function scaffoldSkillsAdaptive(root: string): Promise<void> {
   const skillsDir = path.join(root, '.claude', 'skills');
   if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
 
-  const templates = getScaffoldableTemplates();
+  const profile = getCachedProfile();
+  const templates = profile
+    ? getScaffoldableForProfile(profile)
+    : getScaffoldableTemplates();
+
+  if (templates.length === 0) {
+    void vscode.window.showInformationMessage(
+      'Claude Workflow: All skill files already exist — nothing to scaffold.'
+    );
+    return;
+  }
+
   const created: string[] = [];
   const skipped: string[] = [];
 
   for (const { name, content } of templates) {
     const dest = path.join(skillsDir, `${name}.md`);
-    if (fs.existsSync(dest)) {
-      skipped.push(name);
-      continue;
-    }
+    if (fs.existsSync(dest)) { skipped.push(name); continue; }
     fs.writeFileSync(dest, content, 'utf8');
     created.push(name);
   }
@@ -140,8 +163,13 @@ async function scaffoldSkills(root: string): Promise<void> {
     return;
   }
 
-  const msg = `Created ${created.length} skill files (${skipped.length} already existed).`;
-  void vscode.window.showInformationMessage(`Claude Workflow: ${msg}`);
+  void vscode.window.showInformationMessage(
+    `Claude Workflow: Created ${created.length} skills (${skipped.length} already existed).`
+  );
+
+  // Refresh profile so panel sees the new files
+  invalidateProfile();
+  void getProfile(root);
 }
 
 // ── Append history ──────────────────────────────────────────────────────────
@@ -246,13 +274,14 @@ function getWorkspaceRoot(): string | null {
   return f && f.length > 0 ? f[0].uri.fsPath : null;
 }
 
-function hasClaudeSkills(root: string): boolean {
-  return fs.existsSync(path.join(root, '.claude', 'skills'));
+function hasClaudeStructure(root: string): boolean {
+  return fs.existsSync(path.join(root, '.claude', 'skills'))
+    || fs.existsSync(path.join(root, '.claude', 'agents'))
+    || fs.existsSync(path.join(root, '.claude', 'settings.json'));
 }
 
 async function syncToWiki(wikiSync: WikiSyncProvider): Promise<void> {
   const result: SyncResult = await wikiSync.syncAll();
-
   const parts: string[] = [];
   if (result.created.length) parts.push(`Created: ${result.created.join(', ')}`);
   if (result.updated.length) parts.push(`Updated: ${result.updated.join(', ')}`);

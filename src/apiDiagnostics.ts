@@ -20,6 +20,7 @@ import {
   loadDeepAuditResults,
   quickCoverageScan,
 } from './apiAuditor';
+import type { ProjectProfile } from './envAssessment';
 
 const DIAGNOSTIC_SOURCE = 'Claude API Audit';
 
@@ -36,11 +37,18 @@ export class ApiDiagnosticsProvider implements vscode.Disposable {
   private auditWatcher: vscode.FileSystemWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  private profile: ProjectProfile | null = null;
+
   private readonly _onSummaryChanged = new vscode.EventEmitter<AuditSummary | null>();
   readonly onSummaryChanged = this._onSummaryChanged.event;
 
   constructor(private readonly workspaceRoot: string) {
     this.collection = vscode.languages.createDiagnosticCollection(DIAGNOSTIC_SOURCE);
+  }
+
+  setProfile(profile: ProjectProfile): void {
+    this.profile = profile;
+    void this.refresh();
   }
 
   start(): void {
@@ -75,7 +83,7 @@ export class ApiDiagnosticsProvider implements vscode.Disposable {
 
   async refresh(): Promise<void> {
     const [coverageIssues, deepResult] = await Promise.all([
-      quickCoverageScan(this.workspaceRoot),
+      quickCoverageScan(this.workspaceRoot, this.profile?.swaggerFormat),
       Promise.resolve(loadDeepAuditResults(this.workspaceRoot)),
     ]);
 

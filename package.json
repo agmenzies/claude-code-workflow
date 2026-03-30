@@ -2,7 +2,7 @@
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
   "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, tech debt, Azure DevOps sync",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "icon": "media/icon.png",
   "publisher": "agmenzies",
   "repository": {
@@ -27,7 +27,9 @@
     "delivery"
   ],
   "activationEvents": [
-    "workspaceContains:.claude/skills"
+    "workspaceContains:.claude/skills",
+    "workspaceContains:.claude/agents",
+    "workspaceContains:.claude/settings.json"
   ],
   "main": "./out/extension.js",
   "contributes": {

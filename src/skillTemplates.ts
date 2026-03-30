@@ -601,3 +601,99 @@ export const ALL_SKILL_TEMPLATES: SkillTemplate[] = [
 export function getScaffoldableTemplates(): SkillTemplate[] {
   return ALL_SKILL_TEMPLATES.filter(t => t.content.length > 0);
 }
+
+// ── Profile-adaptive scaffolding ─────────────────────────────────────────────
+
+import type { ProjectProfile } from './envAssessment';
+
+/**
+ * Adapt template content based on project profile.
+ * Replaces generic references with project-specific values.
+ */
+export function adaptContent(content: string, profile: ProjectProfile): string {
+  let result = content;
+
+  // 1. Package manager commands
+  if (profile.testCommand && profile.testCommand !== 'npm test') {
+    result = result.replace(/`npm run test`/g, `\`${profile.testCommand}\``);
+    result = result.replace(/`npm test`/g, `\`${profile.testCommand}\``);
+    result = result.replace(/\bnpm run test\b/g, profile.testCommand);
+  }
+  if (profile.checkCommand) {
+    result = result.replace(/`npm run check`/g, `\`${profile.checkCommand}\``);
+  }
+  if (profile.lintCommand) {
+    result = result.replace(/`npm run lint`/g, `\`${profile.lintCommand}\``);
+  }
+
+  // 2. Swagger format
+  if (profile.swaggerFormat === 'typescript' && profile.swaggerDir) {
+    result = result.replace(
+      /note style \(YAML\/JSON, OpenAPI 3\.x vs 2\.x\)/g,
+      `note style (TypeScript code-first in \`${profile.swaggerDir}/\`)`
+    );
+    result = result.replace(
+      /create `swagger\/paths\/` \+ `swagger\/openapi\.yaml`/g,
+      `add TypeScript path modules to \`${profile.swaggerDir}/paths/\``
+    );
+    result = result.replace(
+      /YAML or JSON/g,
+      'TypeScript code-first'
+    );
+  }
+
+  // 3. Agent structure — directory vs single file
+  if (profile.agentStructure === 'directory' && profile.existingAgents.length > 0) {
+    result = result.replace(
+      /Save to `agent-playbooks\.md`/g,
+      'Update the relevant agent file in `.claude/agents/`'
+    );
+    result = result.replace(
+      /Read `agent-playbooks\.md` if it exists/g,
+      'Read agent definitions from `.claude/agents/` directory'
+    );
+    result = result.replace(
+      /If `\.claude\/agents\/` exists, read the agent files/g,
+      `Read the ${profile.existingAgents.length} agent files in \`.claude/agents/\``
+    );
+  }
+
+  // 4. Release notes → CHANGELOG equivalence
+  const changelogDoc = profile.livingDocs.find(
+    d => d.expectedName === 'release-notes.md' && d.status === 'equivalent'
+  );
+  if (changelogDoc?.actualPath) {
+    const filename = changelogDoc.actualPath;
+    result = result.replace(/release-notes\.md/g, filename);
+    result = result.replace(/`release-notes\.md`/g, `\`${filename}\``);
+  }
+
+  // 5. Test config path
+  if (profile.testConfigPath) {
+    result = result.replace(
+      /jest\.config\.\*/g,
+      profile.testConfigPath
+    );
+  }
+
+  return result;
+}
+
+/**
+ * Returns adapted templates filtered to only skills that are missing.
+ * Custom skills (content differs from template) are never overwritten.
+ */
+export function getScaffoldableForProfile(profile: ProjectProfile): SkillTemplate[] {
+  const missingNames = new Set(
+    profile.existingSkills
+      .filter(s => s.status === 'missing')
+      .map(s => s.name)
+  );
+
+  return getScaffoldableTemplates()
+    .filter(t => missingNames.has(t.name))
+    .map(t => ({
+      ...t,
+      content: adaptContent(t.content, profile),
+    }));
+}
