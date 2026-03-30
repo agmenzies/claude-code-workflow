@@ -3,7 +3,11 @@
   "displayName": "Claude Code Workflow",
   "description": "Session checklist, skill runner, and living docs for Claude Code agent projects",
   "version": "0.1.0",
-  "publisher": "nestsen",
+  "publisher": "agmenzies",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agmenzies/claude-code-workflow.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
