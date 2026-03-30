@@ -22,11 +22,17 @@ import {
 } from './apiAuditor';
 
 const DIAGNOSTIC_SOURCE = 'Claude API Audit';
-const AUDIT_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function getAuditStaleMs(): number {
+  const hours = vscode.workspace
+    .getConfiguration('claudeWorkflow')
+    .get<number>('staleThresholdHours', 8);
+  return hours * 60 * 60 * 1000;
+}
 
 export class ApiDiagnosticsProvider implements vscode.Disposable {
   private readonly collection: vscode.DiagnosticCollection;
-  private routeWatcher: vscode.FileSystemWatcher | null = null;
+  private routeWatchers: vscode.FileSystemWatcher[] = [];
   private auditWatcher: vscode.FileSystemWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -51,7 +57,7 @@ export class ApiDiagnosticsProvider implements vscode.Disposable {
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       watcher.onDidChange(() => this.scheduleRefresh());
       watcher.onDidCreate(() => this.scheduleRefresh());
-      this.routeWatcher = watcher; // last one wins for disposal — acceptable for now
+      this.routeWatchers.push(watcher);
     }
 
     // Watch the Claude audit result file
@@ -89,7 +95,7 @@ export class ApiDiagnosticsProvider implements vscode.Disposable {
 
   isAuditStale(): boolean {
     const age = auditResultAge(this.workspaceRoot);
-    return age === null || age > AUDIT_STALE_MS;
+    return age === null || age > getAuditStaleMs();
   }
 
   hasAuditFile(): boolean {
@@ -98,7 +104,7 @@ export class ApiDiagnosticsProvider implements vscode.Disposable {
 
   dispose(): void {
     this.collection.dispose();
-    this.routeWatcher?.dispose();
+    this.routeWatchers.forEach(w => w.dispose());
     this.auditWatcher?.dispose();
     this._onSummaryChanged.dispose();
     if (this.debounceTimer) clearTimeout(this.debounceTimer);

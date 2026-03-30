@@ -1,0 +1,136 @@
+# azure-pipelines-wiki-sync.yml
+#
+# Syncs living docs from your repo to Azure DevOps Wiki on every push to main.
+# Copy this file to your project's root and configure the variables below.
+#
+# Prerequisites:
+# 1. A wiki exists in your Azure DevOps project
+# 2. The build service identity has "Contribute" permission on the wiki
+#    (Project Settings → Repos → select wiki repo → Security → add build service)
+# 3. Set WIKI_ID variable (find it via: az devops wiki list --org ... --project ...)
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - 'decision-log.md'
+      - 'patterns-library.md'
+      - 'failure-modes.md'
+      - 'tech-debt.md'
+      - 'release-notes.md'
+      - 'UAT.md'
+      - 'design-standards.md'
+      - 'agent-playbooks.md'
+      - 'post-reviews.md'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # ── Configure these ──
+  WIKI_ID: ''                         # Set to your wiki ID
+  WIKI_ROOT: '/Claude Workflow'       # Root path in wiki
+
+steps:
+  - checkout: self
+
+  - task: Bash@3
+    displayName: 'Sync living docs to wiki'
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -euo pipefail
+
+        ORG_URL="$(System.CollectionUri)"
+        PROJECT="$(System.TeamProject)"
+        WIKI_ID="$(WIKI_ID)"
+        ROOT="$(WIKI_ROOT)"
+        TOKEN="$(System.AccessToken)"
+
+        if [ -z "$WIKI_ID" ]; then
+          echo "##[error]WIKI_ID variable is not set. Run 'az devops wiki list' to find your wiki ID."
+          exit 1
+        fi
+
+        sync_page() {
+          local file="$1"
+          local page_name="$2"
+
+          if [ ! -f "$file" ]; then
+            echo "Skipping $file (not found)"
+            return
+          fi
+
+          local content
+          content=$(cat "$file")
+          local page_path="${ROOT}/${page_name}"
+          local encoded_path
+          encoded_path=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${page_path}', safe=''))")
+
+          local url="${ORG_URL}${PROJECT}/_apis/wiki/wikis/${WIKI_ID}/pages?path=${encoded_path}&api-version=7.0"
+
+          # Try to get existing page for eTag
+          local etag=""
+          local response
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${url}&includeContent=false") || true
+
+          if [ "$response" = "200" ]; then
+            etag=$(curl -s -I \
+              -H "Authorization: Bearer ${TOKEN}" \
+              "${url}&includeContent=false" | grep -i "etag" | awk '{print $2}' | tr -d '\r')
+          fi
+
+          # Create JSON payload
+          local payload
+          payload=$(python3 -c "
+        import json, sys
+        content = sys.stdin.read()
+        print(json.dumps({'content': content}))
+        " <<< "$content")
+
+          local headers=(-H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json")
+          if [ -n "$etag" ]; then
+            headers+=(-H "If-Match: ${etag}")
+          fi
+
+          local http_code
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X PUT \
+            "${headers[@]}" \
+            -d "$payload" \
+            "$url")
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            if [ -n "$etag" ]; then
+              echo "Updated: ${page_name}"
+            else
+              echo "Created: ${page_name}"
+            fi
+          else
+            echo "##[warning]Failed to sync ${page_name} (HTTP ${http_code})"
+          fi
+        }
+
+        echo "Syncing living docs to Azure DevOps Wiki..."
+        echo "Wiki ID: ${WIKI_ID}"
+        echo "Root path: ${ROOT}"
+        echo ""
+
+        sync_page "decision-log.md"      "Decision Log"
+        sync_page "patterns-library.md"  "Patterns Library"
+        sync_page "failure-modes.md"     "Failure Modes"
+        sync_page "tech-debt.md"         "Tech Debt"
+        sync_page "release-notes.md"     "Release Notes"
+        sync_page "UAT.md"              "UAT Spec"
+        sync_page "design-standards.md" "Design Standards"
+        sync_page "agent-playbooks.md"  "Agent Playbooks"
+        sync_page "post-reviews.md"     "Post-Reviews"
+
+        echo ""
+        echo "Wiki sync complete."
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)

@@ -1,8 +1,8 @@
 {
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
-  "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, failure modes, tech debt, and more",
-  "version": "0.3.0",
+  "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, tech debt, Azure DevOps sync",
+  "version": "0.4.0",
   "publisher": "agmenzies",
   "repository": {
     "type": "git",
@@ -29,9 +29,11 @@
       { "command": "claudeWorkflow.releaseNotes",    "title": "Generate Release Notes",          "category": "Claude Workflow", "icon": "$(tag)" },
       { "command": "claudeWorkflow.postReview",      "title": "Post-Implementation Review",      "category": "Claude Workflow", "icon": "$(comment-discussion)" },
       { "command": "claudeWorkflow.updatePlaybooks", "title": "Update Agent Playbooks",          "category": "Claude Workflow", "icon": "$(robot)" },
-      { "command": "claudeWorkflow.scaffoldSkills",  "title": "Scaffold All Skills",             "category": "Claude Workflow", "icon": "$(wand)" },
-      { "command": "claudeWorkflow.appendHistory",   "title": "Append to Instruction History",   "category": "Claude Workflow", "icon": "$(add)" },
-      { "command": "claudeWorkflow.refresh",         "title": "Refresh",                         "category": "Claude Workflow", "icon": "$(refresh)" }
+      { "command": "claudeWorkflow.scaffoldSkills",      "title": "Scaffold All Skills",             "category": "Claude Workflow", "icon": "$(wand)" },
+      { "command": "claudeWorkflow.syncToWiki",        "title": "Sync Living Docs to Wiki",        "category": "Claude Workflow", "icon": "$(cloud-upload)" },
+      { "command": "claudeWorkflow.syncDebtToWorkItems","title": "Sync Tech Debt to Work Items",   "category": "Claude Workflow", "icon": "$(issues)" },
+      { "command": "claudeWorkflow.appendHistory",     "title": "Append to Instruction History",   "category": "Claude Workflow", "icon": "$(add)" },
+      { "command": "claudeWorkflow.refresh",           "title": "Refresh",                         "category": "Claude Workflow", "icon": "$(refresh)" }
     ],
     "views": {
       "explorer": [{
@@ -94,6 +96,31 @@
           "items": { "type": "string" },
           "default": ["/health", "/api/health", "/api/public", "/api/auth/login", "/api/auth/register"],
           "description": "Route prefixes that are intentionally public (auth not required)"
+        },
+        "claudeWorkflow.azureDevOps.organization": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps organization name (e.g. 'mycompany' from dev.azure.com/mycompany)"
+        },
+        "claudeWorkflow.azureDevOps.project": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps project name"
+        },
+        "claudeWorkflow.azureDevOps.wikiRootPath": {
+          "type": "string",
+          "default": "/Claude Workflow",
+          "description": "Root path in the wiki where living docs are synced"
+        },
+        "claudeWorkflow.azureDevOps.wikiId": {
+          "type": "string",
+          "default": "",
+          "description": "Wiki ID to sync to. Leave empty to auto-discover or be prompted."
+        },
+        "claudeWorkflow.azureDevOps.debtWorkItemType": {
+          "type": "string",
+          "default": "Task",
+          "description": "Azure DevOps work item type for tech debt entries (e.g. Task, Bug, User Story)"
         }
       }
     }

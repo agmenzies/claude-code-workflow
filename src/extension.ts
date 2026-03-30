@@ -7,6 +7,8 @@ import { WorkflowPanelProvider } from './workflowPanel';
 import { WorkflowStatusBar } from './statusBar';
 import { ApiDiagnosticsProvider } from './apiDiagnostics';
 import { getScaffoldableTemplates } from './skillTemplates';
+import { WikiSyncProvider, SyncResult } from './wikiSync';
+import { WorkItemSyncProvider } from './workItemSync';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getWorkspaceRoot();
@@ -22,6 +24,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const statusBar = new WorkflowStatusBar();
   const panelProvider = new WorkflowPanelProvider(root, runner);
   const apiDiagnostics = new ApiDiagnosticsProvider(root);
+  const wikiSync = new WikiSyncProvider(root, context.secrets);
+  const workItemSync = new WorkItemSyncProvider(root, context.secrets);
 
   // Wire history → status bar + panel
   tracker.onDidChange(state => {
@@ -73,6 +77,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ['claudeWorkflow.releaseNotes',    skill('release-notes')],
     ['claudeWorkflow.postReview',      skill('post-review')],
     ['claudeWorkflow.updatePlaybooks', skill('update-playbooks')],
+
+    // Azure DevOps sync
+    ['claudeWorkflow.syncToWiki', () => void syncToWiki(wikiSync)],
+    ['claudeWorkflow.syncDebtToWorkItems', () => void workItemSync.syncTechDebt()],
 
     // Utility
     ['claudeWorkflow.refresh', () => {
@@ -230,4 +238,25 @@ function getWorkspaceRoot(): string | null {
 
 function hasClaudeSkills(root: string): boolean {
   return fs.existsSync(path.join(root, '.claude', 'skills'));
+}
+
+async function syncToWiki(wikiSync: WikiSyncProvider): Promise<void> {
+  const result: SyncResult = await wikiSync.syncAll();
+
+  const parts: string[] = [];
+  if (result.created.length) parts.push(`Created: ${result.created.join(', ')}`);
+  if (result.updated.length) parts.push(`Updated: ${result.updated.join(', ')}`);
+  if (result.skipped.length) parts.push(`Skipped (no local file): ${result.skipped.length}`);
+  if (result.errors.length) parts.push(`Errors: ${result.errors.map(e => e.doc).join(', ')}`);
+
+  if (parts.length === 0) {
+    void vscode.window.showInformationMessage('Wiki sync: nothing to sync.');
+    return;
+  }
+
+  if (result.errors.length) {
+    void vscode.window.showWarningMessage(`Wiki sync: ${parts.join(' | ')}`);
+  } else {
+    void vscode.window.showInformationMessage(`Wiki sync: ${parts.join(' | ')}`);
+  }
 }
