@@ -10,7 +10,8 @@ import { getScaffoldableForProfile, getScaffoldableTemplates } from './skillTemp
 import { WikiSyncProvider, SyncResult } from './wikiSync';
 import { WorkItemSyncProvider } from './workItemSync';
 import { SetupWizard } from './setupWizard';
-import { getProfile, invalidateProfile, getCachedProfile, ProjectProfile } from './envAssessment';
+import { getProfile, invalidateProfile, getCachedProfile } from './envAssessment';
+import { ContextGenerator } from './contextGenerator';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getWorkspaceRoot();
@@ -47,11 +48,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── Run environment assessment (non-blocking) ─────────────────────────────
 
+  const contextGen = new ContextGenerator(root);
+
   const profilePromise = getProfile(root);
   profilePromise.then(profile => {
     panelProvider.setProfile(profile);
     apiDiagnostics.setProfile(profile);
     wikiSync.setProfile(profile);
+    contextGen.setProfile(profile);
   });
 
   // Pass profile promise to wizard so it can show assessment results
@@ -93,6 +97,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ['claudeWorkflow.syncToWiki', () => void syncToWiki(wikiSync)],
     ['claudeWorkflow.syncDebtToWorkItems', () => void workItemSync.syncTechDebt()],
 
+    // Context generation
+    ['claudeWorkflow.regenerateContext', () => void regenerateContext(contextGen)],
+
     // Utility
     ['claudeWorkflow.refresh', () => {
       tracker.refresh();
@@ -101,6 +108,7 @@ export function activate(context: vscode.ExtensionContext): void {
         panelProvider.setProfile(profile);
         apiDiagnostics.setProfile(profile);
         wikiSync.setProfile(profile);
+        contextGen.setProfile(profile);
         panelProvider.refresh();
       });
       void apiDiagnostics.refresh();
@@ -116,7 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   watchForGitCommit(root, tracker, context);
-  context.subscriptions.push(tracker, statusBar, treeView, apiDiagnostics);
+  context.subscriptions.push(tracker, statusBar, treeView, apiDiagnostics, contextGen);
 
   // Auto-show wizard on first activation
   const hasSeenWizard = context.workspaceState.get<boolean>('hasSeenSetupWizard', false);
@@ -272,6 +280,24 @@ function watchForGitCommit(root: string, tracker: HistoryTracker, ctx: vscode.Ex
 function getWorkspaceRoot(): string | null {
   const f = vscode.workspace.workspaceFolders;
   return f && f.length > 0 ? f[0].uri.fsPath : null;
+}
+
+async function regenerateContext(contextGen: ContextGenerator): Promise<void> {
+  const result = await contextGen.regenerate();
+  const parts: string[] = [];
+  if (result.written.length) parts.push(`Updated: ${result.written.join(', ')}`);
+  if (result.skipped.length) parts.push(`Skipped: ${result.skipped.join(', ')}`);
+  if (result.errors.length) parts.push(`Errors: ${result.errors.join(', ')}`);
+
+  if (parts.length === 0) {
+    void vscode.window.showInformationMessage('Context: no AI tools detected to write context for.');
+    return;
+  }
+  if (result.errors.length) {
+    void vscode.window.showWarningMessage(`Context: ${parts.join(' | ')}`);
+  } else {
+    void vscode.window.showInformationMessage(`Context: ${parts.join(' | ')}`);
+  }
 }
 
 function hasClaudeStructure(root: string): boolean {

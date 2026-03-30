@@ -2,7 +2,7 @@
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
   "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, tech debt, Azure DevOps sync",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "icon": "media/icon.png",
   "publisher": "agmenzies",
   "repository": {
@@ -141,6 +141,12 @@
         "title": "Append to Instruction History",
         "category": "Claude Workflow",
         "icon": "$(add)"
+      },
+      {
+        "command": "claudeWorkflow.regenerateContext",
+        "title": "Regenerate AI Context",
+        "category": "Claude Workflow",
+        "icon": "$(sync)"
       },
       {
         "command": "claudeWorkflow.openSetup",
@@ -302,6 +308,15 @@
             "/api/auth/register"
           ],
           "description": "Route prefixes that are intentionally public (auth not required)"
+        },
+        "claudeWorkflow.contextTools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["claude-code", "copilot", "cursor", "codex", "aider", "windsurf"]
+          },
+          "default": [],
+          "description": "AI tools to generate context files for. Empty = auto-detect from project files. Set explicitly to control which tools get context."
         },
         "claudeWorkflow.azureDevOps.organization": {
           "type": "string",

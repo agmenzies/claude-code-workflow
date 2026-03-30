@@ -69,6 +69,9 @@ export interface ProjectProfile {
   // Conflicts
   conflicts: ConflictItem[];
 
+  // AI tools detected
+  aiTools: AiToolDetection[];
+
   // Derived commands
   testCommand: string;
   buildCommand: string | null;
@@ -78,6 +81,16 @@ export interface ProjectProfile {
   // Meta
   assessedAt: Date;
   assessmentDurationMs: number;
+}
+
+export type AiToolId = 'claude-code' | 'copilot' | 'cursor' | 'codex' | 'aider' | 'windsurf';
+
+export interface AiToolDetection {
+  id: AiToolId;
+  name: string;
+  detected: boolean;
+  contextFile: string;          // where context should be written
+  existingContextFile: boolean; // whether the file already exists
 }
 
 // ── Known skill names (must match skillRunner.ts) ────────────────────────────
@@ -312,6 +325,61 @@ function discoverSkills(root: string, templateContentMap: Map<string, string>): 
   });
 }
 
+function detectAiTools(root: string): AiToolDetection[] {
+  const tools: Array<{ id: AiToolId; name: string; indicators: string[]; contextFile: string }> = [
+    {
+      id: 'claude-code',
+      name: 'Claude Code',
+      indicators: ['.claude/settings.json', '.claude/agents', '.claude/skills', 'CLAUDE.md'],
+      contextFile: '.claude/rules/living-context.md',
+    },
+    {
+      id: 'copilot',
+      name: 'GitHub Copilot',
+      indicators: ['.github/copilot-instructions.md'],
+      contextFile: '.github/copilot-instructions.md',
+    },
+    {
+      id: 'cursor',
+      name: 'Cursor',
+      indicators: ['.cursorrules', '.cursor/rules'],
+      contextFile: '.cursorrules',
+    },
+    {
+      id: 'codex',
+      name: 'OpenAI Codex',
+      indicators: ['AGENTS.md', 'codex.md'],
+      contextFile: 'AGENTS.md',
+    },
+    {
+      id: 'aider',
+      name: 'Aider',
+      indicators: ['.aider.conf.yml', '.aiderignore'],
+      contextFile: '.aider.conf.yml',
+    },
+    {
+      id: 'windsurf',
+      name: 'Windsurf',
+      indicators: ['.windsurfrules'],
+      contextFile: '.windsurfrules',
+    },
+  ];
+
+  return tools.map(tool => {
+    const detected = tool.indicators.some(indicator =>
+      fs.existsSync(path.join(root, indicator))
+    );
+    const existingContextFile = fs.existsSync(path.join(root, tool.contextFile));
+    return {
+      id: tool.id,
+      name: tool.name,
+      detected,
+      contextFile: tool.contextFile,
+      existingContextFile,
+    };
+  });
+}
+
 function discoverAgents(root: string): { agents: string[]; structure: 'single-file' | 'directory' | 'none' } {
   const agentsDir = path.join(root, '.claude', 'agents');
   if (fs.existsSync(agentsDir)) {
@@ -521,6 +589,7 @@ export async function assess(
   const livingDocs = discoverLivingDocs(root, agentResult.structure);
   const historyFile = detectHistoryFile(root);
   const schemaSyncFile = detectSchemaSyncFile(root);
+  const aiTools = detectAiTools(root);
 
   // Known paths for extra doc dedup
   const knownPaths = new Set<string>();
@@ -548,6 +617,7 @@ export async function assess(
     existingSkills: skills,
     existingAgents: agentResult.agents,
     agentStructure: agentResult.structure,
+    aiTools,
     livingDocs,
     extraDocs,
     historyFile,
