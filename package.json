@@ -1,0 +1,147 @@
+{
+  "name": "claude-code-workflow",
+  "displayName": "Claude Code Workflow",
+  "description": "Session checklist, skill runner, and living docs for Claude Code agent projects",
+  "version": "0.1.0",
+  "publisher": "nestsen",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["claude", "claude-code", "ai", "agents", "workflow"],
+  "activationEvents": [
+    "workspaceContains:.claude/skills"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeWorkflow.updateTests",
+        "title": "Update Tests from History",
+        "category": "Claude Workflow",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "claudeWorkflow.updateUAT",
+        "title": "Update UAT Spec",
+        "category": "Claude Workflow",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "claudeWorkflow.regression",
+        "title": "Run Regression Suite",
+        "category": "Claude Workflow",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "claudeWorkflow.syncDesign",
+        "title": "Sync Design Standards",
+        "category": "Claude Workflow",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "claudeWorkflow.appendHistory",
+        "title": "Append to Instruction History",
+        "category": "Claude Workflow",
+        "icon": "$(add)"
+      },
+      {
+        "command": "claudeWorkflow.refresh",
+        "title": "Refresh",
+        "category": "Claude Workflow",
+        "icon": "$(refresh)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "claudeWorkflowPanel",
+          "name": "Claude Code Workflow",
+          "when": "claudeWorkflow.active"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeWorkflow.refresh",
+          "when": "view == claudeWorkflowPanel",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeWorkflow.updateTests",
+          "when": "view == claudeWorkflowPanel && viewItem == skill-update-tests",
+          "group": "inline"
+        },
+        {
+          "command": "claudeWorkflow.updateUAT",
+          "when": "view == claudeWorkflowPanel && viewItem == skill-update-uat",
+          "group": "inline"
+        },
+        {
+          "command": "claudeWorkflow.regression",
+          "when": "view == claudeWorkflowPanel && viewItem == skill-regression",
+          "group": "inline"
+        },
+        {
+          "command": "claudeWorkflow.syncDesign",
+          "when": "view == claudeWorkflowPanel && viewItem == skill-sync-design",
+          "group": "inline"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "claudeWorkflow.regression",
+        "key": "ctrl+shift+alt+r",
+        "mac": "cmd+shift+alt+r",
+        "when": "claudeWorkflow.active"
+      },
+      {
+        "command": "claudeWorkflow.updateTests",
+        "key": "ctrl+shift+alt+t",
+        "mac": "cmd+shift+alt+t",
+        "when": "claudeWorkflow.active"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Code Workflow",
+      "properties": {
+        "claudeWorkflow.claudePath": {
+          "type": "string",
+          "default": "claude",
+          "description": "Path to the Claude Code CLI binary"
+        },
+        "claudeWorkflow.historyFile": {
+          "type": "string",
+          "default": "instruction-history.toon",
+          "description": "Relative path to the instruction history file"
+        },
+        "claudeWorkflow.autoRemindAfterCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a reminder to update instruction history after git commits"
+        },
+        "claudeWorkflow.staleThresholdHours": {
+          "type": "number",
+          "default": 8,
+          "description": "Hours since last history update before the status bar turns amber"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.24.0"
+  }
+}
