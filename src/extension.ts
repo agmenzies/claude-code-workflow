@@ -9,6 +9,7 @@ import { ApiDiagnosticsProvider } from './apiDiagnostics';
 import { getScaffoldableTemplates } from './skillTemplates';
 import { WikiSyncProvider, SyncResult } from './wikiSync';
 import { WorkItemSyncProvider } from './workItemSync';
+import { SetupWizard } from './setupWizard';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getWorkspaceRoot();
@@ -26,6 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const apiDiagnostics = new ApiDiagnosticsProvider(root);
   const wikiSync = new WikiSyncProvider(root, context.secrets);
   const workItemSync = new WorkItemSyncProvider(root, context.secrets);
+  const setupWizard = new SetupWizard(context, root);
 
   // Wire history → status bar + panel
   tracker.onDidChange(state => {
@@ -91,6 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ['claudeWorkflow.showPanel', () => void treeView.reveal(undefined as unknown as never)],
     ['claudeWorkflow.appendHistory', () => void appendHistoryEntry(root, tracker)],
     ['claudeWorkflow.scaffoldSkills', () => void scaffoldSkills(root)],
+    ['claudeWorkflow.openSetup', () => setupWizard.open()],
   ];
 
   for (const [id, handler] of cmds) {
@@ -99,6 +102,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   watchForGitCommit(root, tracker, context);
   context.subscriptions.push(tracker, statusBar, treeView, apiDiagnostics);
+
+  // Auto-show wizard on first activation in this workspace
+  const hasSeenWizard = context.workspaceState.get<boolean>('hasSeenSetupWizard', false);
+  if (!hasSeenWizard) {
+    void context.workspaceState.update('hasSeenSetupWizard', true);
+    setupWizard.open();
+  }
 }
 
 export function deactivate(): void {}

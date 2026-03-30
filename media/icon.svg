@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FF6B35"/>
+      <stop offset="100%" stop-color="#FF9F1C"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+
+  <!-- Subtle inner shadow -->
+  <rect width="256" height="256" rx="48" fill="none" stroke="rgba(0,0,0,0.1)" stroke-width="1"/>
+
+  <!-- Workflow connection lines (behind everything) -->
+  <line x1="62" y1="68" x2="100" y2="120" stroke="white" opacity="0.18" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="165" y1="140" x2="195" y2="188" stroke="white" opacity="0.18" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="48" y1="188" x2="62" y2="68" stroke="white" opacity="0.1" stroke-width="2" stroke-linecap="round"/>
+  <line x1="195" y1="188" x2="208" y2="68" stroke="white" opacity="0.1" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Lightning bolt (main symbol) -->
+  <path d="M 148 28 L 92 126 L 124 126 L 104 228 L 172 114 L 136 114 Z"
+        fill="white" filter="url(#glow)"/>
+
+  <!-- Workflow nodes -->
+  <circle cx="58" cy="64" r="14" fill="white" opacity="0.35"/>
+  <circle cx="58" cy="64" r="7" fill="white" opacity="0.55"/>
+
+  <circle cx="198" cy="190" r="14" fill="white" opacity="0.35"/>
+  <circle cx="198" cy="190" r="7" fill="white" opacity="0.55"/>
+
+  <circle cx="46" cy="192" r="10" fill="white" opacity="0.25"/>
+  <circle cx="46" cy="192" r="5" fill="white" opacity="0.4"/>
+
+  <circle cx="210" cy="64" r="10" fill="white" opacity="0.25"/>
+  <circle cx="210" cy="64" r="5" fill="white" opacity="0.4"/>
+</svg>
