@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.8.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.9.0-orange" alt="Version">
   <img src="https://img.shields.io/badge/VS%20Code-1.85%2B-blue" alt="VS Code">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -211,13 +211,31 @@ Cmd+Shift+P → "Claude Workflow: Sync Living Docs to Wiki"
 
 Each doc maps to a wiki page under a configurable root path (default: `/Claude Workflow/`). The sync uses the profile to push docs at their actual paths, including equivalents and discovered extras.
 
-### Work item creation
+### Work item creation — multi-source
 
-Parse `tech-debt.md` entries and create Azure DevOps work items with priority mapping and `claude-workflow-tech-debt` tags for duplicate detection.
+Create Azure DevOps work items from any combination of sources in a single command:
 
 ```
-Cmd+Shift+P → "Claude Workflow: Sync Tech Debt to Work Items"
+Cmd+Shift+P → "Claude Workflow: Create Work Items (Multi-Source)"
 ```
+
+A QuickPick shows all open items from:
+- `tech-debt.md` — open TD entries
+- `.claude/dod-result.md` — failed DoD checklist items
+- `.claude/api-audit.json` — Critical and High severity API issues
+- `post-reviews.md` — unchecked `- [ ]` action items
+
+Select any combination, all are created as work items in one pass. Critical/High items are pre-selected.
+
+### Bidirectional board status sync
+
+When items are closed on the Azure DevOps board, sync that status back to the living docs:
+
+```
+Cmd+Shift+P → "Claude Workflow: Sync Board Status"
+```
+
+Queries all `claude-workflow` tagged work items, finds those in Closed/Resolved/Done state, and updates the corresponding `tech-debt.md` entries to `Status: Resolved (YYYY-MM-DD)`.
 
 ### Automated pipeline
 
@@ -233,13 +251,33 @@ Copy `templates/azure-pipelines-wiki-sync.yml` to your project. It syncs living 
 
 ---
 
+## Trello integration
+
+Connect a Trello board in one step — the wizard walks you through board and list selection:
+
+```
+Cmd+Shift+P → "Claude Workflow: Connect Trello Board"
+```
+
+You will be prompted to select your project board and map three lists (Backlog, In Progress, Done). API key and token are stored in VS Code SecretStorage.
+
+Once connected, create cards from the same multi-source picker:
+
+```
+Cmd+Shift+P → "Claude Workflow: Sync Items to Trello"
+```
+
+The Board section in the sidebar shows your In Progress cards in real time. Click any card to open it in Trello.
+
+---
+
 ## Sidebar panel
 
-The **Claude Code Workflow** panel appears in the Explorer sidebar when the extension is active. It has four sections:
+The **Claude Code Workflow** panel appears in the Explorer sidebar when the extension is active. It has five sections:
 
 ### Session Checklist
 
-Green/red indicators for: history updated, tests updated, UAT current, API audit current, design standards synced, Definition of Done run. Uses the project profile for accurate detection (e.g. finds tests at `config/jest.config.ts`, not just the 5 default paths).
+Green/red indicators for: history updated, tests updated, UAT current, API audit current, design standards synced, Definition of Done run. Uses the project profile for accurate detection.
 
 ### Skills
 
@@ -249,9 +287,25 @@ Organised into four categories (Workflow, API, Capture, Generate). Click any ski
 
 Coverage stats from the last audit: Swagger coverage, auth applied, rate limiting. Each shows a percentage with green/amber/red indicator.
 
-### Living Docs
+### Artifacts
 
-Quick-open links for every discovered doc, including equivalents (shown with actual filename) and extras discovered by the assessment.
+Every living doc discovered in the project with a real-time activity view:
+
+- **Age badge** — "today", "yesterday", "3d ago", "last week", "stale" — colour coded green → amber → red
+- **Open items count** — tech-debt shows open item count, failure-modes shows total entries, post-reviews shows unchecked action count, decision log shows total decisions, instruction history shows entry count
+- **Missing docs** shown as grey placeholders — click to scaffold
+
+### Board
+
+Live view of your Azure DevOps sprint and/or Trello in-progress cards:
+
+- **Azure DevOps** — current sprint name, up to 8 active work items with state indicators, direct links
+- **Trello** — In Progress cards with click-to-open links
+- **Create Work Items** / **Create Cards** action buttons (multi-source picker)
+- **Sync Board Status** button (bidirectional — updates living docs from closed items)
+- **Refresh** button with last-loaded time
+
+The Board section only appears when ADO or Trello is configured. When neither is set up, it shows connect prompts instead.
 
 ---
 
@@ -285,6 +339,11 @@ After each git commit, a notification reminds you to update the history if it lo
 | `claudeWorkflow.scaffoldSkills` | Scaffold All Skills | |
 | `claudeWorkflow.syncToWiki` | Sync Living Docs to Wiki | |
 | `claudeWorkflow.syncDebtToWorkItems` | Sync Tech Debt to Work Items | |
+| `claudeWorkflow.syncMultiSourceItems` | Create Work Items (Multi-Source) | |
+| `claudeWorkflow.syncBoardStatus` | Sync Board Status | |
+| `claudeWorkflow.refreshBoard` | Refresh Board | |
+| `claudeWorkflow.connectTrello` | Connect Trello Board | |
+| `claudeWorkflow.syncToTrello` | Sync Items to Trello | |
 | `claudeWorkflow.regenerateContext` | Regenerate AI Context | |
 | `claudeWorkflow.appendHistory` | Append to Instruction History | |
 | `claudeWorkflow.openSetup` | Open Setup Wizard | |
@@ -309,6 +368,11 @@ After each git commit, a notification reminds you to update the history if it lo
 | `claudeWorkflow.azureDevOps.wikiRootPath` | string | `"/Claude Workflow"` | Wiki root path |
 | `claudeWorkflow.azureDevOps.wikiId` | string | `""` | Wiki ID (empty = auto-discover) |
 | `claudeWorkflow.azureDevOps.debtWorkItemType` | string | `"Task"` | Work item type for tech debt |
+| `claudeWorkflow.trello.boardId` | string | `""` | Trello board ID (set by Connect wizard) |
+| `claudeWorkflow.trello.boardName` | string | `""` | Trello board display name |
+| `claudeWorkflow.trello.backlogListId` | string | `""` | Trello Backlog list ID |
+| `claudeWorkflow.trello.inProgressListId` | string | `""` | Trello In Progress list ID |
+| `claudeWorkflow.trello.doneListId` | string | `""` | Trello Done list ID |
 
 ---
 
@@ -318,18 +382,20 @@ After each git commit, a notification reminds you to update the history if it lo
 src/
 ├── extension.ts          Entry point — registers commands, starts services
 ├── envAssessment.ts      Project scanning — 14 detectors build ProjectProfile
-├── contextGenerator.ts   Synthesises docs → AI tool context files
+├── contextGenerator.ts   Synthesises docs → AI tool context files (incl. sprint)
 ├── setupWizard.ts        Multi-step webview wizard
-├── workflowPanel.ts      Explorer sidebar tree view
+├── workflowPanel.ts      Explorer sidebar — Checklist, Skills, API Health, Artifacts, Board
 ├── statusBar.ts          Status bar item
 ├── historyTracker.ts     Watches instruction-history.toon
 ├── skillRunner.ts        Runs Claude Code skills via terminal
-├── skillTemplates.ts     10 bundled skill prompts + adaptive scaffolding
+├── skillTemplates.ts     15 bundled skill prompts + adaptive scaffolding
 ├── apiAuditor.ts         Route scanner + Swagger coverage checker
 ├── apiDiagnostics.ts     VS Code diagnostics from audit results
-├── azureDevOps.ts        REST client for wiki + work items
+├── azureDevOps.ts        REST client — wiki, work items, sprint items
 ├── wikiSync.ts           Pushes docs to Azure DevOps Wiki
-└── workItemSync.ts       Creates work items from tech-debt.md
+├── workItemSync.ts       Multi-source work item creation + bidirectional sync
+├── trelloClient.ts       REST client for Trello API (no npm deps)
+└── trelloSync.ts         Trello board connection wizard + card creation
 ```
 
 ---
@@ -338,6 +404,7 @@ src/
 
 | Version | What changed |
 |---------|-------------|
+| **0.9.0** | Trello integration (connect wizard, card creation, in-progress sidebar view); ADO multi-source work item creation from 4 sources; bidirectional board status sync; sprint context injection into AI tools; Artifacts sidebar with age badges + open item counts; Board sidebar with live sprint/card view |
 | **0.8.0** | Full skill coverage — all 15 skills now ship with generic templates; new `/update-observability` skill and living doc; DoD check writes result file for sidebar; Codex circular-detection fix |
 | **0.7.0** | AI context injection — auto-generates context files for Claude Code, Copilot, Cursor, Codex, Aider, Windsurf from living docs |
 | **0.6.0** | Environment assessment — scans project before scaffolding, adapts to what exists |
