@@ -32,20 +32,21 @@ class WorkflowTreeItem extends vscode.TreeItem {
 
 // Map from skill name → VS Code command ID
 const COMMAND_MAP: Record<SkillName, string> = {
-  'update-tests':    'claudeWorkflow.updateTests',
-  'update-uat':      'claudeWorkflow.updateUAT',
-  'regression':      'claudeWorkflow.regression',
-  'sync-design':     'claudeWorkflow.syncDesign',
-  'done-check':      'claudeWorkflow.doneCheck',
-  'audit-api':       'claudeWorkflow.auditApi',
-  'sync-api-docs':   'claudeWorkflow.syncApiDocs',
-  'log-decision':    'claudeWorkflow.logDecision',
-  'capture-pattern': 'claudeWorkflow.capturePattern',
-  'log-failure':     'claudeWorkflow.logFailure',
-  'log-debt':        'claudeWorkflow.logDebt',
-  'release-notes':   'claudeWorkflow.releaseNotes',
-  'post-review':     'claudeWorkflow.postReview',
-  'update-playbooks':'claudeWorkflow.updatePlaybooks',
+  'update-tests':         'claudeWorkflow.updateTests',
+  'update-uat':           'claudeWorkflow.updateUAT',
+  'regression':           'claudeWorkflow.regression',
+  'sync-design':          'claudeWorkflow.syncDesign',
+  'done-check':           'claudeWorkflow.doneCheck',
+  'update-observability': 'claudeWorkflow.updateObservability',
+  'audit-api':            'claudeWorkflow.auditApi',
+  'sync-api-docs':        'claudeWorkflow.syncApiDocs',
+  'log-decision':         'claudeWorkflow.logDecision',
+  'capture-pattern':      'claudeWorkflow.capturePattern',
+  'log-failure':          'claudeWorkflow.logFailure',
+  'log-debt':             'claudeWorkflow.logDebt',
+  'release-notes':        'claudeWorkflow.releaseNotes',
+  'post-review':          'claudeWorkflow.postReview',
+  'update-playbooks':     'claudeWorkflow.updatePlaybooks',
 };
 
 export class WorkflowPanelProvider

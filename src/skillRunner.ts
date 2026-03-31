@@ -9,6 +9,7 @@ export type SkillName =
   | 'regression'
   | 'sync-design'
   | 'done-check'
+  | 'update-observability'
   // API
   | 'audit-api'
   | 'sync-api-docs'
@@ -37,7 +38,8 @@ const SKILL_META: Record<SkillName, SkillMeta> = {
   'update-uat':    { label: 'Update UAT',             description: 'Regenerate UAT.md from instruction-history.toon',                icon: 'checklist',    category: 'workflow' },
   'regression':    { label: 'Run Regression',         description: 'Run Jest, TypeScript check, lint, and UAT checklist',            icon: 'run-all',      category: 'workflow' },
   'sync-design':   { label: 'Sync Design Standards',  description: 'Scan codebase and update design-standards.md',                   icon: 'symbol-color', category: 'workflow' },
-  'done-check':    { label: 'Definition of Done',     description: 'Run the full DoD checklist against recent work',                 icon: 'tasklist',     category: 'workflow' },
+  'done-check':             { label: 'Definition of Done',          description: 'Run the full DoD checklist against recent work',                 icon: 'tasklist',     category: 'workflow' },
+  'update-observability':  { label: 'Update Observability',         description: 'Update observability-expectations.md — logging, metrics, alerting', icon: 'pulse',        category: 'workflow' },
 
   // ── API ──
   'audit-api':     { label: 'Audit API',              description: 'Check routes for auth, rate limits, validation, Swagger',        icon: 'shield',       category: 'api' },

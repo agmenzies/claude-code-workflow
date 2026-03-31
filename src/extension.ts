@@ -72,11 +72,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const cmds: Array<[string, () => void | Promise<void>]> = [
     // Workflow skills
-    ['claudeWorkflow.updateTests',     skill('update-tests')],
-    ['claudeWorkflow.updateUAT',       skill('update-uat')],
-    ['claudeWorkflow.regression',      skill('regression')],
-    ['claudeWorkflow.syncDesign',      skill('sync-design')],
-    ['claudeWorkflow.doneCheck',       skill('done-check')],
+    ['claudeWorkflow.updateTests',        skill('update-tests')],
+    ['claudeWorkflow.updateUAT',          skill('update-uat')],
+    ['claudeWorkflow.regression',         skill('regression')],
+    ['claudeWorkflow.syncDesign',         skill('sync-design')],
+    ['claudeWorkflow.doneCheck',          skill('done-check')],
+    ['claudeWorkflow.updateObservability', skill('update-observability')],
 
     // API skills
     ['claudeWorkflow.auditApi',        skill('audit-api')],

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.7.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.8.0-orange" alt="Version">
   <img src="https://img.shields.io/badge/VS%20Code-1.85%2B-blue" alt="VS Code">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -84,9 +84,9 @@ The profile is used everywhere: sidebar checklist, skill templates, API auditor,
 
 ---
 
-## Skills (14 total)
+## Skills (15 total)
 
-Skills are Claude Code prompts in `.claude/skills/` that you invoke from the command palette, sidebar, or keyboard shortcut. The extension ships 10 template prompts and scaffolds them into your project, adapted to your detected stack.
+Skills are Claude Code prompts in `.claude/skills/` that you invoke from the command palette, sidebar, or keyboard shortcut. The extension ships all 15 prompts and scaffolds them into your project, adapted to your detected stack.
 
 ### Workflow
 
@@ -94,9 +94,10 @@ Skills are Claude Code prompts in `.claude/skills/` that you invoke from the com
 |-------|-------------|----------|
 | `/update-tests` | Generate tests from instruction history | `Cmd+Shift+Alt+T` |
 | `/update-uat` | Regenerate UAT.md from history | |
-| `/regression` | Run Jest + TypeScript + lint + UAT checklist | `Cmd+Shift+Alt+R` |
+| `/regression` | Run TypeScript + lint + tests + UAT checklist | `Cmd+Shift+Alt+R` |
 | `/sync-design` | Scan codebase, update design-standards.md | |
 | `/done-check` | 25-point Definition of Done gate | `Cmd+Shift+Alt+D` |
+| `/update-observability` | Update observability-expectations.md — logging, metrics, alerting | |
 
 ### API
 
@@ -157,6 +158,7 @@ Living doc updated → contextGenerator watches for change
 | Code Patterns | `patterns-library.md` | Templates + anti-patterns |
 | Failure Modes | `failure-modes.md` | Symptom to fix (one-liners) |
 | Active Tech Debt | `tech-debt.md` | Open items with trigger conditions |
+| Observability | `observability-expectations.md` | Log levels, alert thresholds |
 | API Audit | `.claude/api-audit.json` | Coverage and compliance stats |
 
 For files that already have user content (e.g. your own `.cursorrules`), the extension appends a managed section between `<!-- CLAUDE-WORKFLOW-CONTEXT-START -->` markers instead of overwriting.
@@ -270,6 +272,7 @@ After each git commit, a notification reminds you to update the history if it lo
 | `claudeWorkflow.regression` | Run Regression Suite | `Cmd+Shift+Alt+R` |
 | `claudeWorkflow.syncDesign` | Sync Design Standards | |
 | `claudeWorkflow.doneCheck` | Definition of Done Check | `Cmd+Shift+Alt+D` |
+| `claudeWorkflow.updateObservability` | Update Observability Expectations | |
 | `claudeWorkflow.auditApi` | Audit API | `Cmd+Shift+Alt+A` |
 | `claudeWorkflow.syncApiDocs` | Sync API Docs | |
 | `claudeWorkflow.logDecision` | Log Decision | `Cmd+Shift+Alt+L` |
@@ -335,6 +338,7 @@ src/
 
 | Version | What changed |
 |---------|-------------|
+| **0.8.0** | Full skill coverage — all 15 skills now ship with generic templates; new `/update-observability` skill and living doc; DoD check writes result file for sidebar; Codex circular-detection fix |
 | **0.7.0** | AI context injection — auto-generates context files for Claude Code, Copilot, Cursor, Codex, Aider, Windsurf from living docs |
 | **0.6.0** | Environment assessment — scans project before scaffolding, adapts to what exists |
 | **0.5.0** | Bold orange icon, setup wizard webview, VS Code walkthrough |

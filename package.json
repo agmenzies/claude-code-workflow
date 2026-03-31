@@ -2,7 +2,7 @@
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
   "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, tech debt, Azure DevOps sync",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "icon": "media/icon.png",
   "publisher": "agmenzies",
   "repository": {
@@ -63,6 +63,12 @@
         "title": "Definition of Done Check",
         "category": "Claude Workflow",
         "icon": "$(tasklist)"
+      },
+      {
+        "command": "claudeWorkflow.updateObservability",
+        "title": "Update Observability Expectations",
+        "category": "Claude Workflow",
+        "icon": "$(pulse)"
       },
       {
         "command": "claudeWorkflow.auditApi",

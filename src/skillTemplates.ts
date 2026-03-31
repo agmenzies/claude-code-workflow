@@ -6,6 +6,328 @@
  * Generic — works with any Express / Node / React codebase.
  */
 
+// ── Workflow skills ──────────────────────────────────────────────────────────
+
+export const UPDATE_TESTS_SKILL = `---
+name: update-tests
+description: Generate or update unit and integration tests based on recent instruction-history entries. Identifies new behaviour, bug fixes, and edge cases that currently lack test coverage.
+---
+
+You are the test maintainer. Your job is to ensure the test suite accurately covers what has been built.
+
+## Steps
+
+1. **Read recent history** — Read the last 10 entries in \`instruction-history.toon\`. Identify:
+   - New features added (type: Feature addition)
+   - Bug fixes (type: Bug fix) — these always need a regression test
+   - Behaviour changes (type: Enhancement, Update)
+
+2. **Run the current test suite** — Run \`npm run test\` to see what passes and fails.
+
+3. **Find gaps** — For each recent change:
+   - Does a test file exist for the changed module?
+   - Are the new code paths covered? (check for the new function/route/component names)
+   - Is the bug fix scenario covered? (the exact condition that caused the bug)
+
+4. **Write tests** — Follow the existing test patterns in the project:
+   - Mirror the directory structure: \`server/routes/foo.ts\` → \`server/routes/__tests__/foo.test.ts\`
+   - Use the existing test helpers and factories
+   - Test happy path + error paths + edge cases
+
+5. **Run tests again** — Confirm all new tests pass: \`npm run test\`
+
+6. **Report** — List what was added: test file, test cases, and what behaviour they cover.
+
+## Test writing guidelines
+- One \`describe\` per module/function
+- Test names: "should [behaviour] when [condition]"
+- Arrange → Act → Assert pattern
+- Mock external dependencies (database, email, SMS) — test business logic, not infrastructure
+- Edge cases to always cover: null/undefined inputs, empty arrays, boundary values, unauthenticated requests
+- For API routes: test 200, 400, 401/403, and 500 responses
+`;
+
+export const UPDATE_UAT_SKILL = `---
+name: update-uat
+description: Regenerate UAT.md from instruction-history.toon. Keeps the user acceptance test specification in sync with what has been built.
+---
+
+You are maintaining the living UAT specification. This is the document QA and stakeholders use to verify the system works as intended from a user perspective.
+
+## Steps
+
+1. **Read existing UAT.md** — Note the current structure and any sections that are recent and accurate.
+
+2. **Read instruction-history.toon** — Find all entries since the last UAT update (look for a timestamp at the top of UAT.md, or go back 20 entries).
+
+3. **Identify user-facing changes**:
+   - Feature additions and enhancements that changed UI or API behaviour
+   - Bug fixes that changed observable behaviour
+   - Skip: refactoring, configuration changes, internal changes with no user impact
+
+4. **Update UAT.md** — For each feature area touched, add or update scenarios:
+
+\`\`\`markdown
+## [Feature area]
+_Last updated: YYYY-MM-DD_
+
+### Scenario: [user action]
+**Given**: [precondition — user is logged in as X, record exists, etc.]
+**When**: [the action the user takes]
+**Then**: [the expected observable outcome]
+
+| Check | Expected | Pass/Fail |
+|-------|----------|-----------|
+| [specific thing to verify] | [exact expected value/state] | |
+\`\`\`
+
+5. **Update the header**:
+\`\`\`markdown
+# UAT Specification
+_Generated from instruction-history.toon — last updated YYYY-MM-DD, entries #NNN–#NNN_
+\`\`\`
+
+6. **Preserve** existing passing scenarios — only update sections where behaviour changed.
+
+## Notes
+- Write from the user's perspective — "the user clicks", not "the component renders"
+- Each scenario should be runnable by a non-developer
+- Include both happy paths and error scenarios (invalid input, unauthorised access, empty state)
+- For API changes, include a curl example in the scenario
+`;
+
+export const REGRESSION_SKILL = `---
+name: regression
+description: Run the full regression suite. Executes TypeScript type-check, linter, tests, and reviews the UAT checklist. Reports all failures with context.
+---
+
+You are running the project's regression suite. This is the full quality check — run before merging, after a bug fix, or as an ad-hoc quality check.
+
+## Steps
+
+1. **TypeScript check** — Run \`npm run check\`. Report any type errors. Fix obvious ones; note complex ones.
+
+2. **Lint** — Run \`npm run lint\`. Fix any errors before proceeding.
+
+3. **Tests** — Run \`npm run test\`. Note:
+   - Which test files failed?
+   - What is the error message?
+   - Is this a new failure or pre-existing?
+
+4. **UAT review** — Read \`UAT.md\`. For the last 5 features/fixes in \`instruction-history.toon\`, manually walk through the UAT scenarios and verify they still hold.
+
+5. **API audit check** — Check \`.claude/api-audit.json\` if it exists. Note any Critical or High severity issues.
+
+6. **Report** — Write a structured summary:
+
+\`\`\`
+## Regression Report — YYYY-MM-DD HH:MM
+
+### TypeScript
+Status: PASS / FAIL (N errors)
+[list of errors if any]
+
+### Lint
+Status: PASS / FAIL (N warnings, N errors)
+
+### Tests
+Status: PASS / FAIL
+Passed: N | Failed: N
+[list of failed tests with error summary]
+
+### UAT
+Status: PASS / PARTIAL / NOT CHECKED
+[any scenarios that fail or need investigation]
+
+### API Audit
+Status: No issues / N critical, N high issues
+[top issues if any]
+
+### Overall
+PASS — safe to merge
+  OR
+FAIL — N issues require attention
+[numbered list of actions required]
+\`\`\`
+
+## Notes
+- Fix TypeScript and lint errors before running tests — they may be related
+- If tests fail, check if it is a test environment issue before blaming the code
+- A clean regression report is the minimum bar before any merge
+`;
+
+export const SYNC_DESIGN_SKILL = `---
+name: sync-design
+description: Scan the codebase for UI and code conventions and update design-standards.md. Captures component patterns, naming conventions, colour tokens, layout rules, and interaction standards.
+---
+
+You are maintaining the project's design standards. This is the reference every developer and AI agent reads before writing UI code.
+
+## Steps
+
+1. **Read existing design-standards.md** — Note what is already documented. You will UPDATE, not replace.
+
+2. **Scan the codebase for patterns** — Look at:
+   - \`client/src/components/\` — component structure and naming
+   - \`client/src/pages/\` — page layout patterns
+   - Tailwind classes in use — spacing, colours, typography
+   - Form, table, modal, and loading state patterns
+   - Icon usage (which icons map to which actions)
+
+3. **Identify the canonical patterns** — Where the same pattern appears in 3+ places, that is the standard.
+
+4. **Update design-standards.md** with these sections:
+
+\`\`\`markdown
+# Design Standards
+_Last updated: YYYY-MM-DD_
+
+## Quick reference — mandatory rules
+| Rule | Do | Don't |
+|------|-----|-------|
+| Edit action | Use \`<Pencil />\` icon | Custom icons |
+| Delete action | Use \`<Trash2 />\` icon | Unlabelled X |
+| ... | ... | ... |
+
+## Component conventions
+[How components are structured, named, composed]
+
+## Layout patterns
+[Page layout, sidebar, content area, spacing conventions]
+
+## Colour and typography
+[Token names used in practice, heading hierarchy, status colours]
+
+## Form patterns
+[Schema definition → form component → mutation → toast feedback]
+
+## Data display patterns
+[Table, list, card conventions — sorting, pagination, filtering]
+
+## Loading and error states
+[Skeleton, spinner, empty state, toast, error boundary conventions]
+
+## Icon standards
+| Action | Icon | Do not use |
+|--------|------|-----------|
+| Edit | \`<Pencil />\` | Pen, Edit, Write |
+| Delete | \`<Trash2 />\` | X, Remove |
+| View | \`<Eye />\` | Search |
+| Add | \`<Plus />\` | Add, New |
+
+## Interaction patterns
+[Modal, drawer, confirmation dialog, tooltip conventions]
+\`\`\`
+
+5. **Save** updates to \`design-standards.md\`.
+
+## Notes
+- Look at the most-used, most-recent components — they reflect current standards
+- The "Quick reference — mandatory rules" table is injected into AI tool context — keep it concise
+- Update after any UI sprint, after adding new components, or when onboarding a new agent
+`;
+
+// ── Observability ─────────────────────────────────────────────────────────────
+
+export const UPDATE_OBSERVABILITY_SKILL = `---
+name: update-observability
+description: Update observability-expectations.md — the project's standard for what to log, what to measure, what to alert on, and how to trace requests. Run after any new service, job, or integration is added.
+---
+
+You are maintaining the project's observability standards. This document defines what production visibility looks like so every new feature ships with the right logging, metrics, and alerting built in.
+
+## Steps
+
+1. **Read existing observability-expectations.md** — Note what is already documented. You will UPDATE, not replace.
+
+2. **Read recent history** — Read the last 10 entries in \`instruction-history.toon\`. Identify new services, jobs, integrations, or critical paths added.
+
+3. **Review logging in changed files** — Check:
+   - Are key operations logged at the right level?
+   - Are error paths logging enough context to diagnose in production?
+   - Is sensitive data absent from log messages?
+   - Are correlation/trace IDs propagated?
+
+4. **Update observability-expectations.md** with these sections:
+
+\`\`\`markdown
+# Observability Expectations
+_Last updated: YYYY-MM-DD_
+
+## Logging standards
+
+### Log levels
+| Level | Use for |
+|-------|---------|
+| \`error\` | Unhandled exceptions, failed external calls, data integrity issues |
+| \`warn\` | Recoverable errors, retries, deprecated usage, config anomalies |
+| \`info\` | Key business events (user created, payment processed, job completed) |
+| \`debug\` | Diagnostic detail — disabled in production |
+
+### Required log fields
+Every log entry must include: \`timestamp\`, \`level\`, \`service\`, \`message\`.
+Business events must also include: \`companyId\`, \`userId\` (where available), \`correlationId\`.
+
+### What to always log
+- Service startup and shutdown with config summary (no secrets)
+- External API calls: service name, endpoint, status code, duration
+- Database errors: query context, error message (no data)
+- Auth events: login, logout, token refresh, permission denial
+- Job start/completion/failure with duration
+- Webhook receipt and dispatch
+
+### What never to log
+- Passwords, tokens, or credentials
+- Full request/response bodies containing PII
+- Credit card numbers, national insurance numbers, bank details
+
+## Metrics
+
+### Key metrics to track
+| Metric | Type | Description |
+|--------|------|-------------|
+| http_request_duration_ms | histogram | Per route, per status code |
+| job_duration_ms | histogram | Per job type |
+| external_api_errors_total | counter | Per service, per error type |
+| active_users | gauge | Current authenticated sessions |
+
+## Alerting
+
+### Alert thresholds
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| Error rate spike | >5% of requests returning 5xx in 5 min window | Critical |
+| Job failure | Any scheduled job fails 3 times consecutively | High |
+| External API down | >3 consecutive failures to a critical integration | High |
+| Slow response | p95 latency >2s for any route over 5 min window | Medium |
+
+## Tracing
+
+### Correlation IDs
+- \`X-Correlation-ID\` header passed through from API gateway
+- Generated at request entry point if absent
+- Included in all downstream calls and log entries
+- Returned in error responses for support use
+
+## Service-specific expectations
+
+[Add a subsection per service/integration as the project grows]
+\`\`\`
+
+5. **Save** to \`observability-expectations.md\`.
+
+## When to run this skill
+- After adding a new service or background job
+- After integrating a new third-party service
+- After a production incident caused by missing observability
+- At the start of any performance or reliability sprint
+
+## Notes
+- "What to always log" is the minimum bar — new services must meet it before shipping
+- Alert thresholds should be reviewed quarterly — too many alerts causes alert fatigue
+- Every critical business transaction should be traceable end-to-end via correlation ID
+`;
+
 // ── API skills (from v0.2.0) ─────────────────────────────────────────────────
 
 export const AUDIT_API_SKILL = `---
@@ -167,8 +489,9 @@ You are running the project's Definition of Done checklist. This is the quality 
 - [ ] Feature can be rolled back without data loss
 - [ ] Environment variables documented if new ones added
 
-3. **Report** — Output a structured summary:
-\`\`\`
+3. **Report** — Write a structured summary and save it to \`.claude/dod-result.md\`:
+
+\`\`\`markdown
 ## Definition of Done — [Feature/Fix name]
 Date: YYYY-MM-DD
 
@@ -177,7 +500,11 @@ Date: YYYY-MM-DD
 |----------|------|------|-----|
 | Code quality | X | Y | Z |
 | Tests | ... | ... | ... |
-| ...
+| Documentation | ... | ... | ... |
+| Security & permissions | ... | ... | ... |
+| Observability | ... | ... | ... |
+| User experience | ... | ... | ... |
+| Rollout readiness | ... | ... | ... |
 
 ### Failures requiring action
 1. [item] — [what needs to happen]
@@ -188,6 +515,8 @@ COMPLETE — all items pass or N/A
   OR
 INCOMPLETE — N items require action before this is done
 \`\`\`
+
+4. **Write the result file** — Save the full report above to \`.claude/dod-result.md\`. The VS Code extension reads this file to show green/amber status in the sidebar checklist.
 
 ## Notes
 - N/A is valid — not every change touches UI or API
@@ -575,11 +904,12 @@ export interface SkillTemplate {
 
 export const ALL_SKILL_TEMPLATES: SkillTemplate[] = [
   // Workflow
-  { name: 'update-tests',  category: 'workflow', content: '' }, // already exists per-project
-  { name: 'update-uat',    category: 'workflow', content: '' },
-  { name: 'regression',    category: 'workflow', content: '' },
-  { name: 'sync-design',   category: 'workflow', content: '' },
-  { name: 'done-check',    category: 'workflow', content: DONE_CHECK_SKILL },
+  { name: 'update-tests',       category: 'workflow', content: UPDATE_TESTS_SKILL },
+  { name: 'update-uat',         category: 'workflow', content: UPDATE_UAT_SKILL },
+  { name: 'regression',         category: 'workflow', content: REGRESSION_SKILL },
+  { name: 'sync-design',        category: 'workflow', content: SYNC_DESIGN_SKILL },
+  { name: 'done-check',         category: 'workflow', content: DONE_CHECK_SKILL },
+  { name: 'update-observability', category: 'workflow', content: UPDATE_OBSERVABILITY_SKILL },
 
   // API
   { name: 'audit-api',     category: 'api', content: AUDIT_API_SKILL },
