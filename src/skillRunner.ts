@@ -21,7 +21,9 @@ export type SkillName =
   // Generate
   | 'release-notes'
   | 'post-review'
-  | 'update-playbooks';
+  | 'update-playbooks'
+  | 'plan-sprint'
+  | 'risk-review';
 
 export type SkillCategory = 'workflow' | 'api' | 'capture' | 'generate';
 
@@ -55,6 +57,8 @@ const SKILL_META: Record<SkillName, SkillMeta> = {
   'release-notes':    { label: 'Release Notes',       description: 'Generate release notes from recent history',                      icon: 'tag',         category: 'generate' },
   'post-review':      { label: 'Post-Review',         description: 'Capture what slowed you down, what was missing',                  icon: 'comment-discussion', category: 'generate' },
   'update-playbooks': { label: 'Update Playbooks',    description: 'Update agent-playbooks.md with prompt templates and patterns',    icon: 'robot',       category: 'generate' },
+  'plan-sprint':      { label: 'Plan Sprint',          description: 'Generate prioritised sprint plan from velocity + open backlog',      icon: 'calendar',    category: 'generate' },
+  'risk-review':      { label: 'Risk Review',          description: 'Flag triggered tech debt, recent failures, and open API issues',     icon: 'warning',     category: 'generate' },
 };
 
 export const SKILL_CATEGORIES: Record<SkillCategory, string> = {

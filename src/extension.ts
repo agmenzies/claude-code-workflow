@@ -14,6 +14,8 @@ import { SetupWizard } from './setupWizard';
 import { getProfile, invalidateProfile, getCachedProfile } from './envAssessment';
 import { ContextGenerator } from './contextGenerator';
 import { AzureDevOpsClient } from './azureDevOps';
+import { PlanningEngine } from './planningEngine';
+import { SprintPlanner } from './sprintPlanner';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getWorkspaceRoot();
@@ -31,6 +33,22 @@ export function activate(context: vscode.ExtensionContext): void {
   const wikiSync       = new WikiSyncProvider(root, context.secrets);
   const workItemSync   = new WorkItemSyncProvider(root, context.secrets);
   const trelloSync     = new TrelloSyncProvider(root, context.secrets);
+  const planningEngine = new PlanningEngine(root);
+  const sprintPlanner  = new SprintPlanner(
+    context, root, runner,
+    () => planningEngine.getState(),
+    async () => { await planningEngine.compute(); }
+  );
+
+  // Wire planning state changes → panel + planner
+  planningEngine.onDidChange(state => {
+    panelProvider.setPlanningState(state);
+    sprintPlanner.updateState(state);
+  });
+
+  // Initial compute (non-blocking — panel shows spinner until complete)
+  panelProvider.setPlanningComputing(true);
+  void planningEngine.compute();
 
   // Wire history → status bar + panel
   tracker.onDidChange(state => {
@@ -107,6 +125,11 @@ export function activate(context: vscode.ExtensionContext): void {
     // Board refresh
     ['claudeWorkflow.refreshBoard', () => void refreshBoard(root, context.secrets, panelProvider, contextGen)],
 
+    // Planning
+    ['claudeWorkflow.openPlanner',  () => sprintPlanner.open()],
+    ['claudeWorkflow.planSprint',   skill('plan-sprint')],
+    ['claudeWorkflow.riskReview',   skill('risk-review')],
+
     // Context generation
     ['claudeWorkflow.regenerateContext', () => void regenerateContext(contextGen)],
 
@@ -134,7 +157,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   watchForGitCommit(root, tracker, context);
-  context.subscriptions.push(tracker, statusBar, treeView, apiDiagnostics, contextGen);
+  context.subscriptions.push(tracker, statusBar, treeView, apiDiagnostics, contextGen, planningEngine);
 
   // Auto-show wizard on first activation
   const hasSeenWizard = context.workspaceState.get<boolean>('hasSeenSetupWizard', false);

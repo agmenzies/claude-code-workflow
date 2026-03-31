@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AzureDevOpsClient, AdoConfig, AdoTaggedItem } from './azureDevOps';
 
-interface DebtEntry {
+export interface DebtEntry {
   id: string;           // e.g. "TD-001"
   title: string;
   category: string;
@@ -436,4 +436,79 @@ export class WorkItemSyncProvider {
     fs.writeFileSync(filePath, updated, 'utf8');
     return true;
   }
+}
+
+// ── Module-level exported parsers (used by planningEngine.ts) ───────────────
+
+export function parseDebtFile(workspaceRoot: string): DebtEntry[] {
+  const filePath = path.join(workspaceRoot, 'tech-debt.md');
+  if (!fs.existsSync(filePath)) return [];
+  const content = fs.readFileSync(filePath, 'utf8');
+  const sections = content.split(/^### (TD-\d+):\s*(.+)$/gm);
+  const entries: DebtEntry[] = [];
+  for (let i = 1; i + 2 < sections.length; i += 3) {
+    const id = sections[i];
+    const title = sections[i + 1].trim();
+    const body  = sections[i + 2];
+    entries.push({
+      id, title,
+      category:    extractBoldField(body, 'Category') || 'Unknown',
+      priority:    extractBoldField(body, 'Priority') || 'Medium',
+      status:      extractBoldField(body, 'Status')   || 'Open',
+      description: body.trim(),
+    });
+  }
+  return entries;
+}
+
+export function parseDoDFile(workspaceRoot: string): string[] {
+  const filePath = path.join(workspaceRoot, '.claude', 'dod-result.md');
+  if (!fs.existsSync(filePath)) return [];
+  const content = fs.readFileSync(filePath, 'utf8');
+  const section = content.match(/### Failures requiring action\n([\s\S]*?)(?=###|$)/);
+  if (!section) return [];
+  return section[1]
+    .split('\n')
+    .filter(l => /^\d+\./.test(l.trim()))
+    .map(l => l.replace(/^\d+\.\s*/, '').trim());
+}
+
+export interface ApiIssueEntry {
+  method: string;
+  apiPath: string;
+  rule: string;
+  severity: string;
+  message: string;
+}
+
+export function parseApiAuditFile(workspaceRoot: string): ApiIssueEntry[] {
+  const filePath = path.join(workspaceRoot, '.claude', 'api-audit.json');
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const audit = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
+      issues?: Array<{ method?: string; path?: string; rule?: string; severity?: string; message?: string }>;
+    };
+    return (audit.issues ?? [])
+      .filter(i => i.severity === 'critical' || i.severity === 'high')
+      .map(i => ({
+        method:   i.method ?? 'GET',
+        apiPath:  i.path ?? '/',
+        rule:     i.rule ?? 'unknown',
+        severity: i.severity ?? 'high',
+        message:  i.message ?? '',
+      }));
+  } catch { return []; }
+}
+
+export function parsePostReviewFile(workspaceRoot: string): string[] {
+  const filePath = path.join(workspaceRoot, 'post-reviews.md');
+  if (!fs.existsSync(filePath)) return [];
+  const content = fs.readFileSync(filePath, 'utf8');
+  return [...content.matchAll(/^- \[ \] (.+)/gm)].map(m => m[1].trim());
+}
+
+function extractBoldField(body: string, fieldName: string): string {
+  const re = new RegExp(`\\*\\*${fieldName}\\*\\*:\\s*(.+)`, 'i');
+  const m  = body.match(re);
+  return m ? m[1].trim() : '';
 }

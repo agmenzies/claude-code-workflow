@@ -7,6 +7,7 @@ import { AuditSummary } from './apiAuditor';
 import type { ProjectProfile } from './envAssessment';
 import type { AdoSprintItem } from './azureDevOps';
 import type { TrelloCard } from './trelloClient';
+import type { PlanningState } from './planningEngine';
 
 type ItemKind =
   | 'section'
@@ -18,7 +19,9 @@ type ItemKind =
   | 'board-header'
   | 'board-item'
   | 'board-action'
-  | 'artifact';
+  | 'artifact'
+  | 'forecast'
+  | 'forecast-item';
 
 class WorkflowTreeItem extends vscode.TreeItem {
   constructor(
@@ -58,6 +61,8 @@ const COMMAND_MAP: Record<SkillName, string> = {
   'release-notes':        'claudeWorkflow.releaseNotes',
   'post-review':          'claudeWorkflow.postReview',
   'update-playbooks':     'claudeWorkflow.updatePlaybooks',
+  'plan-sprint':          'claudeWorkflow.planSprint',
+  'risk-review':          'claudeWorkflow.riskReview',
 };
 
 interface BoardState {
@@ -82,6 +87,8 @@ export class WorkflowPanelProvider
   private auditSummary: AuditSummary | null = null;
   private auditStale = true;
   private profile: ProjectProfile | null = null;
+  private planningState: PlanningState | null = null;
+  private planningComputing = false;
   private boardState: BoardState = {
     adoSprintName:   '',
     adoItems:        [],
@@ -119,6 +126,17 @@ export class WorkflowPanelProvider
 
   refresh(): void { this._onDidChangeTreeData.fire(); }
 
+  setPlanningState(state: PlanningState): void {
+    this.planningState = state;
+    this.planningComputing = false;
+    this._onDidChangeTreeData.fire();
+  }
+
+  setPlanningComputing(computing: boolean): void {
+    this.planningComputing = computing;
+    this._onDidChangeTreeData.fire();
+  }
+
   getTreeItem(element: WorkflowTreeItem): vscode.TreeItem { return element; }
 
   getChildren(element?: WorkflowTreeItem): WorkflowTreeItem[] {
@@ -131,6 +149,7 @@ export class WorkflowPanelProvider
     if (label === 'API Health')        return this.getApiHealthItems();
     if (label === 'Artifacts')         return this.getArtifactItems();
     if (label === 'Board')             return this.getBoardTopItems();
+    if (label === 'Forecast')          return this.getForecastItems();
 
     // Skill sub-categories
     for (const [cat, catLabel] of Object.entries(SKILL_CATEGORIES) as Array<[SkillCategory, string]>) {
@@ -179,6 +198,11 @@ export class WorkflowPanelProvider
         { iconPath: new vscode.ThemeIcon('cloud-download'),
           description: 'Connect ADO or Trello' }));
     }
+
+    roots.push(new WorkflowTreeItem('Forecast', 'section',
+      vscode.TreeItemCollapsibleState.Collapsed,
+      { iconPath: new vscode.ThemeIcon('telescope'),
+        description: this.forecastSummary() }));
 
     return roots;
   }
@@ -458,6 +482,98 @@ export class WorkflowPanelProvider
     );
 
     return items;
+  }
+
+  // ── Forecast section ───────────────────────────────────────────────────────
+
+  private getForecastItems(): WorkflowTreeItem[] {
+    if (this.planningComputing || (!this.planningState && !this.planningComputing)) {
+      return [new WorkflowTreeItem(
+        this.planningComputing ? 'Computing\u2026' : 'No data yet \u2014 refresh to compute',
+        'forecast-item', vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon(this.planningComputing ? 'loading~spin' : 'sync'),
+          command: this.planningComputing ? undefined : { command: 'claudeWorkflow.refresh', title: 'Refresh' } }
+      )];
+    }
+
+    const s       = this.planningState!;
+    const r       = s.readiness;
+    const v       = s.velocity;
+    const total   = s.backlog.length;
+    const critical = s.backlog.filter(i => i.priority === 'Critical').length;
+
+    const readinessColour = r.colour === 'green'
+      ? new vscode.ThemeColor('testing.iconPassed')
+      : r.colour === 'amber'
+        ? new vscode.ThemeColor('list.warningForeground')
+        : new vscode.ThemeColor('list.errorForeground');
+
+    const readinessIcon = r.colour === 'green' ? 'pass'
+      : r.colour === 'amber' ? 'warning' : 'error';
+
+    const trendIcon = v.trend === 'up' ? 'arrow-up'
+      : v.trend === 'down' ? 'arrow-down' : 'arrow-right';
+
+    const trendSuffix = v.trendPercent > 0
+      ? ` ${v.trend === 'up' ? '\u2191' : v.trend === 'down' ? '\u2193' : '\u2192'} ${v.trendPercent}%`
+      : '';
+
+    const sprintPlanLabel = s.sprintPlanExists
+      ? (s.sprintPlanAgeDays === 0 ? 'Sprint planned today'
+        : s.sprintPlanAgeDays === 1 ? 'Sprint planned yesterday'
+        : `Sprint plan ${s.sprintPlanAgeDays}d old`)
+      : 'No sprint plan yet';
+
+    return [
+      new WorkflowTreeItem('Release Readiness', 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { description: `${r.score}/100 \u00b7 Grade ${r.grade}`,
+          iconPath: new vscode.ThemeIcon(readinessIcon, readinessColour),
+          tooltip: `DoD: ${r.breakdown.dodScore}/25 \u00b7 API: ${r.breakdown.apiScore}/25 \u00b7 Debt: ${r.breakdown.debtScore}/25 \u00b7 UAT: ${r.breakdown.uatScore}/25` }),
+      new WorkflowTreeItem('Velocity', 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { description: `${v.fourWeekAverage}/week${trendSuffix}`,
+          iconPath: new vscode.ThemeIcon(trendIcon),
+          tooltip: `4-week average: ${v.fourWeekAverage} entries/week. Prior 4 weeks: ${v.priorFourWeekAverage}` }),
+      new WorkflowTreeItem('Open Backlog', 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { description: `${total} items${critical > 0 ? `, ${critical} critical` : ''}`,
+          iconPath: new vscode.ThemeIcon('issues') }),
+      new WorkflowTreeItem('Sprint Capacity', 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { description: `~${v.sprintCapacity} items this sprint`,
+          iconPath: new vscode.ThemeIcon('calendar') }),
+      new WorkflowTreeItem(sprintPlanLabel, 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon(s.sprintPlanExists ? 'check' : 'circle-outline'),
+          command: s.sprintPlanExists
+            ? { command: 'vscode.open', title: 'Open Sprint Plan',
+                arguments: [vscode.Uri.file(path.join(this.workspaceRoot, '.claude', 'sprint-plan.md'))] }
+            : undefined }),
+      new WorkflowTreeItem('Open Sprint Planner', 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon('telescope'),
+          command: { command: 'claudeWorkflow.openPlanner', title: 'Open Sprint Planner' } }),
+      new WorkflowTreeItem('Generate Sprint Plan', 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { description: '(AI-powered)',
+          iconPath: new vscode.ThemeIcon('output'),
+          command: { command: 'claudeWorkflow.planSprint', title: 'Generate Sprint Plan' } }),
+      new WorkflowTreeItem('Run Risk Review', 'forecast-item',
+        vscode.TreeItemCollapsibleState.None,
+        { description: '(AI-powered)',
+          iconPath: new vscode.ThemeIcon('warning'),
+          command: { command: 'claudeWorkflow.riskReview', title: 'Run Risk Review' } }),
+    ];
+  }
+
+  private forecastSummary(): string {
+    if (!this.planningState) return '';
+    const { readiness, backlog } = this.planningState;
+    const critical = backlog.filter(i => i.priority === 'Critical').length;
+    return critical > 0
+      ? `${readiness.score}% \u00b7 ${critical} critical`
+      : `${readiness.score}%`;
   }
 
   // ── Artifact helpers ───────────────────────────────────────────────────────

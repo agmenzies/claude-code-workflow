@@ -894,6 +894,120 @@ _Last updated: YYYY-MM-DD_
 - Update after any session where an agent produced wrong output
 `;
 
+// ── Planning skills ──────────────────────────────────────────────────────────
+
+export const PLAN_SPRINT_SKILL = `---
+name: plan-sprint
+description: Generate a data-driven sprint plan from velocity and open backlog items. Reads instruction-history.toon for velocity, collects open items from all sources, and writes .claude/sprint-plan.md.
+---
+
+You are generating a sprint plan based on real project data.
+
+## Steps
+
+1. **Calculate velocity** — Read \`instruction-history.toon\`. Find all entries in the last 8 ISO weeks. Group by week. Compute a 4-week rolling average (entries/week). Sprint capacity = average × 2.
+
+2. **Collect open backlog items** from four sources:
+   - \`tech-debt.md\` — all entries where Status is not "Resolved"
+   - \`.claude/dod-result.md\` — numbered items under "Failures requiring action"
+   - \`.claude/api-audit.json\` — issues where severity is "critical" or "high"
+   - \`post-reviews.md\` — all unchecked \`- [ ]\` action items
+
+3. **Score and prioritise** each item:
+   - Priority weight: Critical=4, High=3, Medium=2, Low=1
+   - Source weight: DoD failure=1.5, API issue=1.4, Tech Debt=1.2, Post-review=1.0
+   - Risk = priority_weight × source_weight (higher = do first)
+   - Sort all items by risk descending
+
+4. **Write \`.claude/sprint-plan.md\`** with this format:
+
+\`\`\`markdown
+# Sprint Plan — YYYY-MM-DD
+
+## Velocity
+- 4-week average: N entries/week
+- Sprint capacity: ~N items (2-week sprint)
+
+## Sprint Goal
+[One sentence synthesising the theme of the top committed items]
+
+## Committed Items
+| # | ID | Title | Source | Priority | Risk |
+|---|-----|-------|--------|----------|------|
+[Top N items up to sprint capacity]
+
+## Stretch Items
+| # | ID | Title | Source | Priority |
+[Next 3-5 items if capacity allows]
+
+## Key Risks This Sprint
+1. [Risk] → [What could go wrong] → [Mitigation]
+2. ...
+3. ...
+
+## DoD Status
+[Read .claude/dod-result.md and report last verdict + date]
+\`\`\`
+
+## Notes
+- Committed items should fill ~80% of capacity; leave 20% buffer for unplanned work
+- Critical items with a "Trigger for action" condition already met MUST be in committed items
+- If DoD last ran INCOMPLETE, add the failed items to committed items
+`;
+
+export const RISK_REVIEW_SKILL = `---
+name: risk-review
+description: Produce a forward-looking risk register for the next sprint. Flags triggered tech debt conditions, recent failure modes, open API security issues, and decisions under review. Writes .claude/risk-review.md.
+---
+
+You are conducting a forward-looking risk review.
+
+## Steps
+
+1. **Tech debt triggers** — Read \`tech-debt.md\`. For each open entry with a "Trigger for action" field, evaluate whether that trigger condition applies NOW given the current state of the codebase and recent instruction history. Flag those where the trigger is active.
+
+2. **Recent failure modes** — Read \`failure-modes.md\`. Flag any FM entry where "Last seen" is within the last 30 days. Include the diagnosis steps and fix.
+
+3. **API security gaps** — Read \`.claude/api-audit.json\`. List all issues with severity "critical" or "high". Group by rule type (missing-auth, missing-rate-limit, etc.). Note which routes are affected.
+
+4. **Decision review candidates** — Read \`decision-log.md\`. Flag any DEC entry where \`**Status**\` is "Revisiting" or where the "Revisit when" / "Trigger" condition appears to be met based on recent instruction history.
+
+5. **Write \`.claude/risk-review.md\`**:
+
+\`\`\`markdown
+# Risk Review — YYYY-MM-DD
+
+## Triggered Tech Debt
+| ID | Title | Trigger condition | Recommended action |
+|----|-------|------------------|-------------------|
+
+## Recent Failure Modes (last 30 days)
+| ID | Symptom | Last seen | Fix |
+|----|---------|-----------|-----|
+
+## Open API Security Issues
+| Route | Method | Rule | Severity | Recommended fix |
+|-------|--------|------|----------|-----------------|
+
+## Decision Log — Review Candidates
+| ID | Decision | Revisit trigger | Recommendation |
+|----|----------|----------------|----------------|
+
+## Summary
+- Total risks identified: N
+- Critical: N | High: N | Medium: N
+- **Recommended immediate actions:**
+  1. [action]
+  2. [action]
+  3. [action]
+\`\`\`
+
+## Notes
+- If a tech debt trigger is "Before we add a 3rd X" and the 3rd X was just added, flag it as active
+- Failure modes that recur within 30 days of being fixed indicate the root cause was not addressed
+- API security issues (missing auth, missing rate limits) should be in the committed sprint items for the next sprint
+`;
+
 // ── All skill templates for scaffolding ──────────────────────────────────────
 
 export interface SkillTemplate {
@@ -925,6 +1039,8 @@ export const ALL_SKILL_TEMPLATES: SkillTemplate[] = [
   { name: 'release-notes',    category: 'generate', content: RELEASE_NOTES_SKILL },
   { name: 'post-review',      category: 'generate', content: POST_REVIEW_SKILL },
   { name: 'update-playbooks', category: 'generate', content: UPDATE_PLAYBOOKS_SKILL },
+  { name: 'plan-sprint',      category: 'generate', content: PLAN_SPRINT_SKILL },
+  { name: 'risk-review',      category: 'generate', content: RISK_REVIEW_SKILL },
 ];
 
 /** Only templates that ship content (workflow skills are project-specific). */

@@ -2,7 +2,7 @@
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
   "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, tech debt, Azure DevOps sync",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "icon": "media/icon.png",
   "publisher": "agmenzies",
   "repository": {
@@ -195,6 +195,24 @@
         "title": "Refresh",
         "category": "Claude Workflow",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeWorkflow.openPlanner",
+        "title": "Open Sprint Planner",
+        "category": "Claude Workflow",
+        "icon": "$(telescope)"
+      },
+      {
+        "command": "claudeWorkflow.planSprint",
+        "title": "Generate Sprint Plan",
+        "category": "Claude Workflow",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "claudeWorkflow.riskReview",
+        "title": "Run Risk Review",
+        "category": "Claude Workflow",
+        "icon": "$(warning)"
       }
     ],
     "views": {
@@ -210,6 +228,11 @@
       "view/title": [
         {
           "command": "claudeWorkflow.refresh",
+          "when": "view == claudeWorkflowPanel",
+          "group": "navigation"
+        },
+        {
+          "command": "claudeWorkflow.openPlanner",
           "when": "view == claudeWorkflowPanel",
           "group": "navigation"
         }
