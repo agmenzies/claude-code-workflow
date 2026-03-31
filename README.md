@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.9.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0-orange" alt="Version">
   <img src="https://img.shields.io/badge/VS%20Code-1.85%2B-blue" alt="VS Code">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -35,14 +35,14 @@ It does three things:
 
 ```bash
 # From VSIX
-code --install-extension claude-code-workflow-0.7.0.vsix
+code --install-extension claude-code-workflow-1.0.0.vsix
 
 # Or from source
 git clone https://github.com/agmenzies/claude-code-workflow.git
 cd claude-code-workflow
 npm install && npm run compile
 npx vsce package
-code --install-extension claude-code-workflow-0.7.0.vsix
+code --install-extension claude-code-workflow-1.0.0.vsix
 ```
 
 ### First run
@@ -84,9 +84,9 @@ The profile is used everywhere: sidebar checklist, skill templates, API auditor,
 
 ---
 
-## Skills (15 total)
+## Skills (17 total)
 
-Skills are Claude Code prompts in `.claude/skills/` that you invoke from the command palette, sidebar, or keyboard shortcut. The extension ships all 15 prompts and scaffolds them into your project, adapted to your detected stack.
+Skills are Claude Code prompts in `.claude/skills/` that you invoke from the command palette, sidebar, or keyboard shortcut. The extension ships all 17 prompts and scaffolds them into your project, adapted to your detected stack.
 
 ### Workflow
 
@@ -122,6 +122,8 @@ Skills are Claude Code prompts in `.claude/skills/` that you invoke from the com
 | `/release-notes` | Generate release notes from history | `release-notes.md` |
 | `/post-review` | Capture what slowed you down, what was missing | `post-reviews.md` |
 | `/update-playbooks` | Update agent prompt templates and patterns | `agent-playbooks.md` |
+| `/plan-sprint` | Score and prioritise backlog, write sprint plan | `.claude/sprint-plan.md` |
+| `/risk-review` | Flag triggered debt, recent failures, open API gaps | `.claude/risk-review.md` |
 
 ---
 
@@ -160,6 +162,7 @@ Living doc updated → contextGenerator watches for change
 | Active Tech Debt | `tech-debt.md` | Open items with trigger conditions |
 | Observability | `observability-expectations.md` | Log levels, alert thresholds |
 | API Audit | `.claude/api-audit.json` | Coverage and compliance stats |
+| Current Sprint | ADO sprint items | Sprint name, work item titles and states |
 
 For files that already have user content (e.g. your own `.cursorrules`), the extension appends a managed section between `<!-- CLAUDE-WORKFLOW-CONTEXT-START -->` markers instead of overwriting.
 
@@ -273,7 +276,7 @@ The Board section in the sidebar shows your In Progress cards in real time. Clic
 
 ## Sidebar panel
 
-The **Claude Code Workflow** panel appears in the Explorer sidebar when the extension is active. It has five sections:
+The **Claude Code Workflow** panel appears in the Explorer sidebar when the extension is active. It has six sections:
 
 ### Session Checklist
 
@@ -306,6 +309,55 @@ Live view of your Azure DevOps sprint and/or Trello in-progress cards:
 - **Refresh** button with last-loaded time
 
 The Board section only appears when ADO or Trello is configured. When neither is set up, it shows connect prompts instead.
+
+### Forecast
+
+Forward-looking planning view, computed automatically from your existing files — no extra input needed:
+
+- **Release Readiness** — 0–100 composite score with letter grade (A–F) and colour coding. Four components: DoD result (0–25), API audit coverage (0–25), open tech debt (0–25), UAT currency (0–25)
+- **Velocity** — entries/week (4-week rolling average) with trend arrow and sprint capacity estimate (~velocity × 2 for a 2-week sprint)
+- **Backlog** — total open items across all 4 sources, with breakdown by type (Tech Debt · DoD · API · PIR)
+- **Sprint capacity** — estimated item budget for the next sprint based on velocity
+- **Sprint plan status** — "Sprint planned today / N days ago" when `.claude/sprint-plan.md` exists, "No plan yet" otherwise
+- **Open Sprint Planner** — opens the full Sprint Planner dashboard
+- **Generate Sprint Plan** → runs `/plan-sprint` in terminal
+- **Run Risk Review** → runs `/risk-review` in terminal
+
+The Forecast section recomputes automatically whenever `tech-debt.md`, `dod-result.md`, `api-audit.json`, `post-reviews.md`, or `instruction-history.toon` change.
+
+---
+
+## Sprint Planner
+
+Open the full planning dashboard:
+
+```
+Cmd+Shift+P → "Claude Workflow: Open Sprint Planner"
+```
+
+Or click the telescope icon (⊙) in the panel toolbar.
+
+The planner is a single-page webview with three rows:
+
+**Row 1 — Metrics**
+- **Release Readiness** — SVG circular gauge, 0–100, letter grade, colour-coded (green ≥70, amber ≥40, red <40)
+- **Velocity** — items/week with trend arrow and sprint capacity estimate
+- **Backlog** — total open items, broken down by source
+
+**Row 2 — Prioritised Backlog**
+- Items grouped Critical → High → Medium → Low
+- Each row: checkbox, ID pill, title, source badge, risk score bar
+- "Select Critical + High" quick-select button
+- Risk score = `priorityWeight × sourceWeight × age` (Critical=4, High=3; DoD source=1.5×, API=1.4×, debt=1.2×, review=1.0×)
+
+**Row 3 — Sprint Plan** (shown when items are selected)
+- Selected items ordered by risk score descending
+- Capacity indicator ("Selected N items · sprint capacity ~N")
+- **Generate AI Sprint Plan** — runs `/plan-sprint` in terminal
+- **Push to Azure DevOps** — creates work items for selected items (hidden if ADO not configured)
+- **Push to Trello** — creates cards for selected items (hidden if Trello not configured)
+
+**Footer** — last DoD verdict + age + quick link to run Done Check
 
 ---
 
@@ -344,6 +396,9 @@ After each git commit, a notification reminds you to update the history if it lo
 | `claudeWorkflow.refreshBoard` | Refresh Board | |
 | `claudeWorkflow.connectTrello` | Connect Trello Board | |
 | `claudeWorkflow.syncToTrello` | Sync Items to Trello | |
+| `claudeWorkflow.openPlanner` | Open Sprint Planner | |
+| `claudeWorkflow.planSprint` | Generate Sprint Plan | |
+| `claudeWorkflow.riskReview` | Run Risk Review | |
 | `claudeWorkflow.regenerateContext` | Regenerate AI Context | |
 | `claudeWorkflow.appendHistory` | Append to Instruction History | |
 | `claudeWorkflow.openSetup` | Open Setup Wizard | |
@@ -384,18 +439,20 @@ src/
 ├── envAssessment.ts      Project scanning — 14 detectors build ProjectProfile
 ├── contextGenerator.ts   Synthesises docs → AI tool context files (incl. sprint)
 ├── setupWizard.ts        Multi-step webview wizard
-├── workflowPanel.ts      Explorer sidebar — Checklist, Skills, API Health, Artifacts, Board
+├── workflowPanel.ts      Explorer sidebar — Checklist, Skills, API Health, Artifacts, Board, Forecast
 ├── statusBar.ts          Status bar item
 ├── historyTracker.ts     Watches instruction-history.toon
 ├── skillRunner.ts        Runs Claude Code skills via terminal
-├── skillTemplates.ts     15 bundled skill prompts + adaptive scaffolding
+├── skillTemplates.ts     17 bundled skill prompts + adaptive scaffolding
 ├── apiAuditor.ts         Route scanner + Swagger coverage checker
 ├── apiDiagnostics.ts     VS Code diagnostics from audit results
 ├── azureDevOps.ts        REST client — wiki, work items, sprint items
 ├── wikiSync.ts           Pushes docs to Azure DevOps Wiki
 ├── workItemSync.ts       Multi-source work item creation + bidirectional sync
 ├── trelloClient.ts       REST client for Trello API (no npm deps)
-└── trelloSync.ts         Trello board connection wizard + card creation
+├── trelloSync.ts         Trello board connection wizard + card creation
+├── planningEngine.ts     Velocity + release readiness + backlog aggregation
+└── sprintPlanner.ts      Sprint Planner webview dashboard
 ```
 
 ---
@@ -404,6 +461,7 @@ src/
 
 | Version | What changed |
 |---------|-------------|
+| **1.0.0** | Forward-looking planning — Sprint Planner webview (velocity, release readiness gauge, prioritised backlog with risk scoring, sprint plan card); Forecast sidebar section (readiness score, velocity, capacity, plan status); `/plan-sprint` and `/risk-review` skills; PlanningEngine auto-recomputes from file watchers |
 | **0.9.0** | Trello integration (connect wizard, card creation, in-progress sidebar view); ADO multi-source work item creation from 4 sources; bidirectional board status sync; sprint context injection into AI tools; Artifacts sidebar with age badges + open item counts; Board sidebar with live sprint/card view |
 | **0.8.0** | Full skill coverage — all 15 skills now ship with generic templates; new `/update-observability` skill and living doc; DoD check writes result file for sidebar; Codex circular-detection fix |
 | **0.7.0** | AI context injection — auto-generates context files for Claude Code, Copilot, Cursor, Codex, Aider, Windsurf from living docs |
