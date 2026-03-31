@@ -5,8 +5,20 @@ import { HistoryState } from './historyTracker';
 import { SkillName, SkillRunner, SkillCategory, SKILL_CATEGORIES } from './skillRunner';
 import { AuditSummary } from './apiAuditor';
 import type { ProjectProfile } from './envAssessment';
+import type { AdoSprintItem } from './azureDevOps';
+import type { TrelloCard } from './trelloClient';
 
-type ItemKind = 'section' | 'category' | 'checklist' | 'skill' | 'doc' | 'api-stat';
+type ItemKind =
+  | 'section'
+  | 'category'
+  | 'checklist'
+  | 'skill'
+  | 'doc'
+  | 'api-stat'
+  | 'board-header'
+  | 'board-item'
+  | 'board-action'
+  | 'artifact';
 
 class WorkflowTreeItem extends vscode.TreeItem {
   constructor(
@@ -23,14 +35,13 @@ class WorkflowTreeItem extends vscode.TreeItem {
   ) {
     super(label, collapsibleState);
     if (options?.description !== undefined) this.description = options.description;
-    if (options?.tooltip) this.tooltip = options.tooltip;
-    if (options?.command) this.command = options.command;
-    if (options?.iconPath) this.iconPath = options.iconPath;
+    if (options?.tooltip)      this.tooltip   = options.tooltip;
+    if (options?.command)      this.command   = options.command;
+    if (options?.iconPath)     this.iconPath  = options.iconPath;
     if (options?.contextValue) this.contextValue = options.contextValue;
   }
 }
 
-// Map from skill name → VS Code command ID
 const COMMAND_MAP: Record<SkillName, string> = {
   'update-tests':         'claudeWorkflow.updateTests',
   'update-uat':           'claudeWorkflow.updateUAT',
@@ -49,6 +60,15 @@ const COMMAND_MAP: Record<SkillName, string> = {
   'update-playbooks':     'claudeWorkflow.updatePlaybooks',
 };
 
+interface BoardState {
+  adoSprintName: string;
+  adoItems: AdoSprintItem[];
+  trelloCards: TrelloCard[];
+  trelloBoardName: string;
+  lastLoaded: Date | null;
+  loading: boolean;
+}
+
 export class WorkflowPanelProvider
   implements vscode.TreeDataProvider<WorkflowTreeItem>
 {
@@ -62,6 +82,14 @@ export class WorkflowPanelProvider
   private auditSummary: AuditSummary | null = null;
   private auditStale = true;
   private profile: ProjectProfile | null = null;
+  private boardState: BoardState = {
+    adoSprintName:   '',
+    adoItems:        [],
+    trelloCards:     [],
+    trelloBoardName: '',
+    lastLoaded:      null,
+    loading:         false,
+  };
 
   constructor(
     private readonly workspaceRoot: string,
@@ -80,7 +108,12 @@ export class WorkflowPanelProvider
 
   updateAudit(summary: AuditSummary | null, stale: boolean): void {
     this.auditSummary = summary;
-    this.auditStale = stale;
+    this.auditStale   = stale;
+    this._onDidChangeTreeData.fire();
+  }
+
+  setBoardState(state: Partial<BoardState>): void {
+    this.boardState = { ...this.boardState, ...state };
     this._onDidChangeTreeData.fire();
   }
 
@@ -93,17 +126,20 @@ export class WorkflowPanelProvider
 
     const label = element.label as string;
 
-    // Top-level sections
     if (label === 'Session Checklist') return this.getChecklistItems();
     if (label === 'Skills')            return this.getSkillCategoryItems();
     if (label === 'API Health')        return this.getApiHealthItems();
-    if (label === 'Living Docs')       return this.getDocItems();
+    if (label === 'Artifacts')         return this.getArtifactItems();
+    if (label === 'Board')             return this.getBoardTopItems();
 
     // Skill sub-categories
-    const categoryEntries = Object.entries(SKILL_CATEGORIES) as Array<[SkillCategory, string]>;
-    for (const [cat, catLabel] of categoryEntries) {
+    for (const [cat, catLabel] of Object.entries(SKILL_CATEGORIES) as Array<[SkillCategory, string]>) {
       if (label === catLabel) return this.getSkillItemsForCategory(cat);
     }
+
+    // Board sub-sections
+    if (label === 'Azure DevOps') return this.getAdoBoardItems();
+    if (label === 'Trello')       return this.getTrelloBoardItems();
 
     return [];
   }
@@ -111,7 +147,11 @@ export class WorkflowPanelProvider
   // ── Root sections ──────────────────────────────────────────────────────────
 
   private getRootItems(): WorkflowTreeItem[] {
-    return [
+    const adoConfigured    = this.isAdoConfigured();
+    const trelloConfigured = this.isTrelloConfigured();
+    const boardIcon = this.boardStateIcon();
+
+    const roots: WorkflowTreeItem[] = [
       new WorkflowTreeItem('Session Checklist', 'section',
         vscode.TreeItemCollapsibleState.Expanded,
         { iconPath: new vscode.ThemeIcon('checklist') }),
@@ -121,27 +161,43 @@ export class WorkflowPanelProvider
       new WorkflowTreeItem('API Health', 'section',
         vscode.TreeItemCollapsibleState.Collapsed,
         { iconPath: new vscode.ThemeIcon(this.apiHealthIcon(), this.apiHealthColour()) }),
-      new WorkflowTreeItem('Living Docs', 'section',
+      new WorkflowTreeItem('Artifacts', 'section',
         vscode.TreeItemCollapsibleState.Collapsed,
-        { iconPath: new vscode.ThemeIcon('book') }),
+        { iconPath: new vscode.ThemeIcon('archive') }),
     ];
+
+    // Only show Board section when at least one integration is configured
+    if (adoConfigured || trelloConfigured) {
+      roots.push(new WorkflowTreeItem('Board', 'section',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        { iconPath: new vscode.ThemeIcon(boardIcon),
+          description: this.boardStateSummary() }));
+    } else {
+      // Show Board as a prompt to connect
+      roots.push(new WorkflowTreeItem('Board', 'section',
+        vscode.TreeItemCollapsibleState.Collapsed,
+        { iconPath: new vscode.ThemeIcon('cloud-download'),
+          description: 'Connect ADO or Trello' }));
+    }
+
+    return roots;
   }
 
   // ── Session checklist ──────────────────────────────────────────────────────
 
   private getChecklistItems(): WorkflowTreeItem[] {
     const items: Array<{ label: string; ok: boolean; cmd?: string }> = [
-      { label: 'History updated',        ok: !this.historyState.isStale,              cmd: 'claudeWorkflow.appendHistory' },
-      { label: 'Tests updated',          ok: this.hasTests() },
-      { label: 'UAT spec current',       ok: this.docRecentByName('UAT.md', 7) },
-      { label: 'API audit current',      ok: !this.auditStale && !!this.auditSummary, cmd: 'claudeWorkflow.auditApi' },
+      { label: 'History updated',         ok: !this.historyState.isStale,              cmd: 'claudeWorkflow.appendHistory' },
+      { label: 'Tests updated',           ok: this.hasTests() },
+      { label: 'UAT spec current',        ok: this.docRecentByName('UAT.md', 7) },
+      { label: 'API audit current',       ok: !this.auditStale && !!this.auditSummary, cmd: 'claudeWorkflow.auditApi' },
       { label: 'Design standards synced', ok: this.docExists('design-standards.md') },
       { label: 'Definition of Done run',  ok: this.recentFile('.claude/dod-result.md', 1), cmd: 'claudeWorkflow.doneCheck' },
     ];
 
     return items.map(c => {
       const icon = c.ok
-        ? new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'))
+        ? new vscode.ThemeIcon('pass',           new vscode.ThemeColor('testing.iconPassed'))
         : new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('testing.iconQueued'));
       return new WorkflowTreeItem(c.label, 'checklist',
         vscode.TreeItemCollapsibleState.None,
@@ -149,17 +205,11 @@ export class WorkflowPanelProvider
     });
   }
 
-  // ── Skills (categorised) ──────────────────────────────────────────────────
+  // ── Skills ─────────────────────────────────────────────────────────────────
 
   private getSkillCategoryItems(): WorkflowTreeItem[] {
     const catOrder: SkillCategory[] = ['workflow', 'api', 'capture', 'generate'];
-    const icons: Record<SkillCategory, string> = {
-      workflow: 'pulse',
-      api: 'shield',
-      capture: 'archive',
-      generate: 'output',
-    };
-
+    const icons: Record<SkillCategory, string> = { workflow: 'pulse', api: 'shield', capture: 'archive', generate: 'output' };
     return catOrder.map(cat =>
       new WorkflowTreeItem(SKILL_CATEGORIES[cat], 'category',
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -168,27 +218,25 @@ export class WorkflowPanelProvider
   }
 
   private getSkillItemsForCategory(category: SkillCategory): WorkflowTreeItem[] {
-    const byCategory = this.runner.getSkillsByCategory();
-    const skills = byCategory.get(category) ?? [];
-
+    const skills = this.runner.getSkillsByCategory().get(category) ?? [];
     return skills.map(skill => {
       const exists = this.runner.skillExists(skill);
-      const meta = SkillRunner.getMeta(skill);
+      const meta   = SkillRunner.getMeta(skill);
       return new WorkflowTreeItem(meta.label, 'skill',
         vscode.TreeItemCollapsibleState.None,
         {
-          description: exists ? '' : '(scaffold to create)',
-          tooltip: meta.description,
-          iconPath: new vscode.ThemeIcon(meta.icon),
+          description:  exists ? '' : '(scaffold to create)',
+          tooltip:      meta.description,
+          iconPath:     new vscode.ThemeIcon(meta.icon),
           contextValue: `skill-${skill}`,
-          command: exists
+          command:      exists
             ? { command: COMMAND_MAP[skill], title: meta.label }
             : { command: 'claudeWorkflow.scaffoldSkills', title: 'Scaffold Skills' },
         });
     });
   }
 
-  // ── API Health ────────────────────────────────────────────────────────────
+  // ── API Health ─────────────────────────────────────────────────────────────
 
   private getApiHealthItems(): WorkflowTreeItem[] {
     if (!this.auditSummary) {
@@ -198,91 +246,333 @@ export class WorkflowPanelProvider
         { iconPath: new vscode.ThemeIcon('warning'),
           command: { command: 'claudeWorkflow.auditApi', title: 'Run Audit' } })];
     }
-
     const s = this.auditSummary;
     const pct = (n: number, d: number) => d > 0 ? Math.round((n / d) * 100) : 100;
-
     const stat = (label: string, val: number, total: number, threshold: number) => {
       const p = pct(val, total);
-      const iconId = p >= threshold ? 'pass'
-        : p >= threshold - 20 ? 'warning' : 'error';
-      const colourId = p >= threshold ? 'testing.iconPassed'
-        : p >= threshold - 20 ? 'list.warningForeground' : 'list.errorForeground';
-      return new WorkflowTreeItem(label, 'api-stat',
-        vscode.TreeItemCollapsibleState.None,
+      const iconId   = p >= threshold ? 'pass' : p >= threshold - 20 ? 'warning' : 'error';
+      const colourId = p >= threshold ? 'testing.iconPassed' : p >= threshold - 20 ? 'list.warningForeground' : 'list.errorForeground';
+      return new WorkflowTreeItem(label, 'api-stat', vscode.TreeItemCollapsibleState.None,
         { description: `${val}/${total} (${p}%)`,
           iconPath: new vscode.ThemeIcon(iconId, new vscode.ThemeColor(colourId)) });
     };
-
     return [
-      stat('Swagger coverage', s.documented, s.totalRoutes, 90),
-      stat('Auth applied',     s.withAuth,   s.totalRoutes, 95),
+      stat('Swagger coverage', s.documented,   s.totalRoutes, 90),
+      stat('Auth applied',     s.withAuth,      s.totalRoutes, 95),
       stat('Rate limiting',    s.withRateLimit, s.totalRoutes, 80),
-      new WorkflowTreeItem('Re-run audit', 'api-stat',
-        vscode.TreeItemCollapsibleState.None,
-        { iconPath: new vscode.ThemeIcon('refresh'),
-          description: this.auditStale ? '(stale)' : '',
+      new WorkflowTreeItem('Re-run audit', 'api-stat', vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon('refresh'), description: this.auditStale ? '(stale)' : '',
           command: { command: 'claudeWorkflow.auditApi', title: 'Audit' } }),
     ];
   }
 
-  // ── Living docs ───────────────────────────────────────────────────────────
+  // ── Artifacts (enhanced Living Docs) ──────────────────────────────────────
 
-  private getDocItems(): WorkflowTreeItem[] {
-    if (!this.profile) return this.getLegacyDocItems();
+  private getArtifactItems(): WorkflowTreeItem[] {
+    const docs = this.profile
+      ? [...this.profile.livingDocs, ...this.profile.extraDocs].filter(d => d.actualPath)
+      : this.getLegacyDocList();
 
     const items: WorkflowTreeItem[] = [];
 
-    // Living docs discovered by assessment (show found ones)
-    for (const doc of this.profile.livingDocs) {
-      if (!doc.actualPath) continue;
-      const suffix = doc.status === 'equivalent' ? ` (${path.basename(doc.actualPath)})` : '';
-      const altSuffix = doc.status === 'alternative' ? ' (agents dir)' : '';
-      items.push(new WorkflowTreeItem(doc.label, 'doc',
+    for (const doc of docs) {
+      const actualPath = 'actualPath' in doc ? (doc.actualPath as string) : (doc as { file: string }).file;
+      if (!actualPath) continue;
+
+      const fullPath   = path.join(this.workspaceRoot, actualPath);
+      const age        = this.fileAgeBadge(fullPath);
+      const openCount  = this.countOpenItems(actualPath);
+      const countBadge = openCount > 0 ? ` · ${openCount} open` : '';
+      const label      = 'label' in doc ? doc.label : (doc as { label: string }).label;
+      const icon       = 'icon' in doc ? (doc.icon as string) : 'file-text';
+
+      items.push(new WorkflowTreeItem(label, 'artifact',
         vscode.TreeItemCollapsibleState.None,
         {
-          description: suffix || altSuffix || '',
-          iconPath: new vscode.ThemeIcon(doc.icon),
-          command: { command: 'vscode.open', title: `Open ${doc.label}`,
-            arguments: [vscode.Uri.file(path.join(this.workspaceRoot, doc.actualPath))] },
+          description:  age ? `${age}${countBadge}` : countBadge || '',
+          tooltip:      `${actualPath}${openCount > 0 ? `\n${openCount} open items` : ''}`,
+          iconPath:     new vscode.ThemeIcon(icon, this.ageColour(fullPath)),
+          command:      { command: 'vscode.open', title: `Open ${label}`,
+            arguments: [vscode.Uri.file(fullPath)] },
         }));
     }
 
-    // Extra docs discovered by assessment (project-specific docs)
-    for (const doc of this.profile.extraDocs) {
-      if (!doc.actualPath) continue;
-      items.push(new WorkflowTreeItem(doc.label, 'doc',
-        vscode.TreeItemCollapsibleState.None,
-        {
-          description: '(discovered)',
-          iconPath: new vscode.ThemeIcon(doc.icon),
-          command: { command: 'vscode.open', title: `Open ${doc.label}`,
-            arguments: [vscode.Uri.file(path.join(this.workspaceRoot, doc.actualPath))] },
-        }));
+    // Add missing docs as grey placeholders so users know what they can create
+    if (this.profile) {
+      for (const doc of this.profile.livingDocs) {
+        if (doc.status === 'missing') {
+          items.push(new WorkflowTreeItem(doc.label, 'artifact',
+            vscode.TreeItemCollapsibleState.None,
+            { description: '(not created yet)',
+              iconPath: new vscode.ThemeIcon(doc.icon, new vscode.ThemeColor('disabledForeground')),
+              command: { command: 'claudeWorkflow.scaffoldSkills', title: 'Scaffold Skills' } }));
+        }
+      }
     }
 
     return items;
   }
 
-  /** Fallback when profile hasn't loaded yet. */
-  private getLegacyDocItems(): WorkflowTreeItem[] {
+  private getLegacyDocList(): Array<{ label: string; file: string; icon: string; actualPath: string }> {
     const docs = [
-      { file: 'instruction-history.toon', label: 'Instruction History', icon: 'history' },
-      { file: 'UAT.md', label: 'UAT Spec', icon: 'checklist' },
-      { file: 'design-standards.md', label: 'Design Standards', icon: 'symbol-color' },
-      { file: 'decision-log.md', label: 'Decision Log', icon: 'milestone' },
-      { file: 'business-rules.md', label: 'Business Rules', icon: 'law' },
-      { file: '.claude/api-audit.json', label: 'API Audit Results', icon: 'shield' },
+      { label: 'Instruction History', file: 'instruction-history.toon', icon: 'history',     actualPath: 'instruction-history.toon' },
+      { label: 'UAT Spec',            file: 'UAT.md',                   icon: 'checklist',    actualPath: 'UAT.md' },
+      { label: 'Design Standards',    file: 'design-standards.md',      icon: 'symbol-color', actualPath: 'design-standards.md' },
+      { label: 'Decision Log',        file: 'decision-log.md',          icon: 'milestone',    actualPath: 'decision-log.md' },
+      { label: 'Tech Debt',           file: 'tech-debt.md',             icon: 'flame',        actualPath: 'tech-debt.md' },
+      { label: 'Failure Modes',       file: 'failure-modes.md',         icon: 'bug',          actualPath: 'failure-modes.md' },
+      { label: 'Business Rules',      file: 'business-rules.md',        icon: 'law',          actualPath: 'business-rules.md' },
+      { label: 'API Audit Results',   file: '.claude/api-audit.json',   icon: 'shield',       actualPath: '.claude/api-audit.json' },
     ];
-    return docs.filter(d => this.fileExists(d.file)).map(d =>
-      new WorkflowTreeItem(d.label, 'doc', vscode.TreeItemCollapsibleState.None,
-        { iconPath: new vscode.ThemeIcon(d.icon),
-          command: { command: 'vscode.open', title: `Open ${d.label}`,
-            arguments: [vscode.Uri.file(path.join(this.workspaceRoot, d.file))] } })
-    );
+    return docs.filter(d => this.fileExists(d.file));
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Board section ──────────────────────────────────────────────────────────
+
+  private getBoardTopItems(): WorkflowTreeItem[] {
+    const ado    = this.isAdoConfigured();
+    const trello = this.isTrelloConfigured();
+
+    if (!ado && !trello) {
+      return [
+        new WorkflowTreeItem('Connect Azure DevOps', 'board-action',
+          vscode.TreeItemCollapsibleState.None,
+          { iconPath: new vscode.ThemeIcon('cloud'),
+            description: 'Open Settings',
+            command: { command: 'workbench.action.openSettings', title: 'Settings',
+              arguments: ['claudeWorkflow.azureDevOps'] } }),
+        new WorkflowTreeItem('Connect Trello', 'board-action',
+          vscode.TreeItemCollapsibleState.None,
+          { iconPath: new vscode.ThemeIcon('plug'),
+            command: { command: 'claudeWorkflow.connectTrello', title: 'Connect Trello' } }),
+      ];
+    }
+
+    const items: WorkflowTreeItem[] = [];
+    if (ado)    items.push(new WorkflowTreeItem('Azure DevOps', 'board-header',
+      vscode.TreeItemCollapsibleState.Expanded,
+      { iconPath: new vscode.ThemeIcon('azure'), description: this.adoBoardSummary() }));
+    if (trello) items.push(new WorkflowTreeItem('Trello', 'board-header',
+      vscode.TreeItemCollapsibleState.Expanded,
+      { iconPath: new vscode.ThemeIcon('versions'), description: this.trelloBoardSummary() }));
+    return items;
+  }
+
+  private getAdoBoardItems(): WorkflowTreeItem[] {
+    const items: WorkflowTreeItem[] = [];
+
+    if (this.boardState.loading) {
+      items.push(new WorkflowTreeItem('Loading\u2026', 'board-item',
+        vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon('loading~spin') }));
+      return items;
+    }
+
+    if (this.boardState.adoItems.length === 0 && !this.boardState.lastLoaded) {
+      items.push(new WorkflowTreeItem('Refresh to load sprint items', 'board-action',
+        vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon('refresh'),
+          command: { command: 'claudeWorkflow.refreshBoard', title: 'Refresh Board' } }));
+    } else {
+      if (this.boardState.adoSprintName) {
+        items.push(new WorkflowTreeItem(
+          `\uD83D\uDCC5 ${this.boardState.adoSprintName}`,
+          'board-item',
+          vscode.TreeItemCollapsibleState.None,
+          { description: `${this.boardState.adoItems.length} items`, iconPath: new vscode.ThemeIcon('calendar') }
+        ));
+      }
+      for (const wi of this.boardState.adoItems.slice(0, 8)) {
+        const stateIcon = this.adoStateIcon(wi.state);
+        items.push(new WorkflowTreeItem(wi.title, 'board-item',
+          vscode.TreeItemCollapsibleState.None,
+          { description: wi.state,
+            tooltip:     `${wi.workItemType} #${wi.id}${wi.assignedTo ? ` · ${wi.assignedTo}` : ''}`,
+            iconPath:    new vscode.ThemeIcon(stateIcon) }));
+      }
+      if (this.boardState.adoItems.length > 8) {
+        items.push(new WorkflowTreeItem(
+          `+${this.boardState.adoItems.length - 8} more items`,
+          'board-item', vscode.TreeItemCollapsibleState.None,
+          { iconPath: new vscode.ThemeIcon('ellipsis') }));
+      }
+    }
+
+    // Action buttons
+    items.push(
+      new WorkflowTreeItem('Create Work Items', 'board-action',
+        vscode.TreeItemCollapsibleState.None,
+        { description: 'from tech debt, DoD, API issues',
+          iconPath: new vscode.ThemeIcon('add'),
+          command: { command: 'claudeWorkflow.syncMultiSourceItems', title: 'Create Work Items' } }),
+      new WorkflowTreeItem('Sync Board Status', 'board-action',
+        vscode.TreeItemCollapsibleState.None,
+        { description: 'close resolved items in living docs',
+          iconPath: new vscode.ThemeIcon('sync'),
+          command: { command: 'claudeWorkflow.syncBoardStatus', title: 'Sync Board Status' } }),
+      new WorkflowTreeItem('Refresh', 'board-action',
+        vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon('refresh'),
+          description: this.boardState.lastLoaded ? `last: ${this.relativeTime(this.boardState.lastLoaded)}` : '',
+          command: { command: 'claudeWorkflow.refreshBoard', title: 'Refresh Board' } }),
+    );
+
+    return items;
+  }
+
+  private getTrelloBoardItems(): WorkflowTreeItem[] {
+    const items: WorkflowTreeItem[] = [];
+    const cfg = vscode.workspace.getConfiguration('claudeWorkflow.trello');
+    const boardName = cfg.get<string>('boardName') || 'Trello';
+
+    if (this.boardState.trelloCards.length === 0) {
+      items.push(new WorkflowTreeItem('Refresh to load In Progress cards', 'board-action',
+        vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon('refresh'),
+          command: { command: 'claudeWorkflow.refreshBoard', title: 'Refresh Board' } }));
+    } else {
+      items.push(new WorkflowTreeItem(`${boardName} \u2014 In Progress`, 'board-item',
+        vscode.TreeItemCollapsibleState.None,
+        { description: `${this.boardState.trelloCards.length} cards`,
+          iconPath: new vscode.ThemeIcon('versions') }));
+      for (const card of this.boardState.trelloCards.slice(0, 6)) {
+        items.push(new WorkflowTreeItem(card.name, 'board-item',
+          vscode.TreeItemCollapsibleState.None,
+          { iconPath: new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('charts.blue')),
+            tooltip:  card.desc?.slice(0, 120) || card.name,
+            command:  { command: 'vscode.open', title: 'Open in Trello',
+              arguments: [vscode.Uri.parse(card.url)] } }));
+      }
+    }
+
+    items.push(
+      new WorkflowTreeItem('Create Cards', 'board-action',
+        vscode.TreeItemCollapsibleState.None,
+        { description: 'from tech debt, DoD, API issues',
+          iconPath: new vscode.ThemeIcon('add'),
+          command: { command: 'claudeWorkflow.syncToTrello', title: 'Create Trello Cards' } }),
+      new WorkflowTreeItem('Refresh', 'board-action',
+        vscode.TreeItemCollapsibleState.None,
+        { iconPath: new vscode.ThemeIcon('refresh'),
+          command: { command: 'claudeWorkflow.refreshBoard', title: 'Refresh Board' } }),
+    );
+
+    return items;
+  }
+
+  // ── Artifact helpers ───────────────────────────────────────────────────────
+
+  private fileAgeBadge(fullPath: string): string {
+    try {
+      const mtime    = fs.statSync(fullPath).mtime;
+      const diffMs   = Date.now() - mtime.getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays === 0)  return 'today';
+      if (diffDays === 1)  return 'yesterday';
+      if (diffDays <= 6)   return `${diffDays}d ago`;
+      if (diffDays <= 13)  return 'last week';
+      if (diffDays <= 29)  return `${Math.floor(diffDays / 7)}w ago`;
+      return 'stale';
+    } catch { return ''; }
+  }
+
+  private ageColour(fullPath: string): vscode.ThemeColor | undefined {
+    try {
+      const diffDays = Math.floor((Date.now() - fs.statSync(fullPath).mtime.getTime()) / 86400000);
+      if (diffDays <= 1)  return new vscode.ThemeColor('testing.iconPassed');
+      if (diffDays <= 7)  return undefined;
+      if (diffDays <= 14) return new vscode.ThemeColor('list.warningForeground');
+      return new vscode.ThemeColor('list.errorForeground');
+    } catch { return new vscode.ThemeColor('disabledForeground'); }
+  }
+
+  private countOpenItems(relPath: string): number {
+    const fullPath = path.join(this.workspaceRoot, relPath);
+    if (!fs.existsSync(fullPath)) return 0;
+    try {
+      const content = fs.readFileSync(fullPath, 'utf8');
+      const base = path.basename(relPath);
+
+      if (base === 'tech-debt.md') {
+        const sections = content.split(/^### TD-/gm).slice(1);
+        return sections.filter(s => {
+          const statusMatch = s.match(/\*\*Status\*\*:\s*(.+)/i);
+          return !statusMatch || !statusMatch[1].toLowerCase().includes('resolved');
+        }).length;
+      }
+      if (base === 'failure-modes.md') {
+        return (content.match(/^### FM-/gm) ?? []).length;
+      }
+      if (base === 'decision-log.md') {
+        return (content.match(/^### DEC-/gm) ?? []).length;
+      }
+      if (base === 'post-reviews.md') {
+        return (content.match(/^- \[ \] /gm) ?? []).length;
+      }
+      if (base === 'instruction-history.toon') {
+        const m = content.match(/instructions\[(\d+)\]/);
+        return m ? parseInt(m[1], 10) : 0;
+      }
+      return 0;
+    } catch { return 0; }
+  }
+
+  // ── Board helpers ─────────────────────────────────────────────────────────
+
+  private isAdoConfigured(): boolean {
+    const cfg = vscode.workspace.getConfiguration('claudeWorkflow.azureDevOps');
+    return !!(cfg.get<string>('organization') && cfg.get<string>('project'));
+  }
+
+  private isTrelloConfigured(): boolean {
+    const cfg = vscode.workspace.getConfiguration('claudeWorkflow.trello');
+    return !!(cfg.get<string>('boardId') && cfg.get<string>('backlogListId'));
+  }
+
+  private boardStateIcon(): string {
+    if (this.boardState.loading) return 'loading~spin';
+    return 'project';
+  }
+
+  private boardStateSummary(): string {
+    const total = this.boardState.adoItems.length + this.boardState.trelloCards.length;
+    if (this.boardState.loading) return 'loading\u2026';
+    if (total === 0 && this.boardState.lastLoaded) return '0 items';
+    if (total > 0) return `${total} items`;
+    return '';
+  }
+
+  private adoBoardSummary(): string {
+    if (!this.boardState.lastLoaded) return '';
+    return this.boardState.adoSprintName
+      ? `${this.boardState.adoSprintName} · ${this.boardState.adoItems.length} items`
+      : `${this.boardState.adoItems.length} items`;
+  }
+
+  private trelloBoardSummary(): string {
+    const n = this.boardState.trelloCards.length;
+    return n > 0 ? `${n} in progress` : '';
+  }
+
+  private adoStateIcon(state: string): string {
+    const s = state.toLowerCase();
+    if (s === 'active' || s === 'in progress') return 'circle-filled';
+    if (s === 'new' || s === 'proposed')       return 'circle-outline';
+    if (s === 'resolved' || s === 'closed' || s === 'done') return 'pass';
+    return 'circle-outline';
+  }
+
+  private relativeTime(date: Date): string {
+    const diffMs = Date.now() - date.getTime();
+    const mins   = Math.floor(diffMs / 60000);
+    if (mins < 1)  return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24)  return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
+  // ── General helpers ────────────────────────────────────────────────────────
 
   private apiHealthIcon(): string {
     if (!this.auditSummary) return 'shield';
@@ -310,14 +600,12 @@ export class WorkflowPanelProvider
     } catch { return false; }
   }
 
-  /** Profile-aware test directory check. Falls back to legacy glob if no profile. */
   private hasTests(): boolean {
     if (this.profile) return this.profile.testDirectories.length > 0;
     return ['server/__tests__', 'src/__tests__', '__tests__', 'test', 'tests']
       .some(d => this.fileExists(d));
   }
 
-  /** Check if a living doc exists — uses profile equivalence if available. */
   private docExists(expectedName: string): boolean {
     if (this.profile) {
       const doc = this.profile.livingDocs.find(d => d.expectedName === expectedName);
@@ -326,7 +614,6 @@ export class WorkflowPanelProvider
     return this.fileExists(expectedName);
   }
 
-  /** Check if a living doc was recently updated — resolves actual path via profile. */
   private docRecentByName(expectedName: string, days: number): boolean {
     if (this.profile) {
       const doc = this.profile.livingDocs.find(d => d.expectedName === expectedName);

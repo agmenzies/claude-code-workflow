@@ -2,7 +2,7 @@
   "name": "claude-code-workflow",
   "displayName": "Claude Code Workflow",
   "description": "Delivery cadence toolkit for Claude Code projects — session checklist, API auditing, decision log, DoD, patterns library, tech debt, Azure DevOps sync",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "icon": "media/icon.png",
   "publisher": "agmenzies",
   "repository": {
@@ -141,6 +141,36 @@
         "title": "Sync Tech Debt to Work Items",
         "category": "Claude Workflow",
         "icon": "$(issues)"
+      },
+      {
+        "command": "claudeWorkflow.syncMultiSourceItems",
+        "title": "Create Work Items (Multi-Source)",
+        "category": "Claude Workflow",
+        "icon": "$(add)"
+      },
+      {
+        "command": "claudeWorkflow.syncBoardStatus",
+        "title": "Sync Board Status",
+        "category": "Claude Workflow",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "claudeWorkflow.refreshBoard",
+        "title": "Refresh Board",
+        "category": "Claude Workflow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeWorkflow.connectTrello",
+        "title": "Connect Trello Board",
+        "category": "Claude Workflow",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "claudeWorkflow.syncToTrello",
+        "title": "Sync Items to Trello",
+        "category": "Claude Workflow",
+        "icon": "$(versions)"
       },
       {
         "command": "claudeWorkflow.appendHistory",
@@ -348,6 +378,31 @@
           "type": "string",
           "default": "Task",
           "description": "Azure DevOps work item type for tech debt entries (e.g. Task, Bug, User Story)"
+        },
+        "claudeWorkflow.trello.boardId": {
+          "type": "string",
+          "default": "",
+          "description": "Trello board ID (set automatically by Connect Trello Board)"
+        },
+        "claudeWorkflow.trello.boardName": {
+          "type": "string",
+          "default": "",
+          "description": "Trello board name (set automatically by Connect Trello Board)"
+        },
+        "claudeWorkflow.trello.backlogListId": {
+          "type": "string",
+          "default": "",
+          "description": "Trello list ID for Backlog (set automatically by Connect Trello Board)"
+        },
+        "claudeWorkflow.trello.inProgressListId": {
+          "type": "string",
+          "default": "",
+          "description": "Trello list ID for In Progress (set automatically by Connect Trello Board)"
+        },
+        "claudeWorkflow.trello.doneListId": {
+          "type": "string",
+          "default": "",
+          "description": "Trello list ID for Done (set automatically by Connect Trello Board)"
         }
       }
     }

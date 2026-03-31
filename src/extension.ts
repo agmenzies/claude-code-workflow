@@ -9,27 +9,28 @@ import { ApiDiagnosticsProvider } from './apiDiagnostics';
 import { getScaffoldableForProfile, getScaffoldableTemplates } from './skillTemplates';
 import { WikiSyncProvider, SyncResult } from './wikiSync';
 import { WorkItemSyncProvider } from './workItemSync';
+import { TrelloSyncProvider } from './trelloSync';
 import { SetupWizard } from './setupWizard';
 import { getProfile, invalidateProfile, getCachedProfile } from './envAssessment';
 import { ContextGenerator } from './contextGenerator';
+import { AzureDevOpsClient } from './azureDevOps';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getWorkspaceRoot();
   if (!root) return;
-
-  // Activate on .claude/skills OR .claude/agents (some projects have agents but not skills yet)
   if (!hasClaudeStructure(root)) return;
 
   void vscode.commands.executeCommand('setContext', 'claudeWorkflow.active', true);
 
   // Core services
-  const tracker = new HistoryTracker(context);
-  const runner = new SkillRunner(root);
-  const statusBar = new WorkflowStatusBar();
-  const panelProvider = new WorkflowPanelProvider(root, runner);
+  const tracker        = new HistoryTracker(context);
+  const runner         = new SkillRunner(root);
+  const statusBar      = new WorkflowStatusBar();
+  const panelProvider  = new WorkflowPanelProvider(root, runner);
   const apiDiagnostics = new ApiDiagnosticsProvider(root);
-  const wikiSync = new WikiSyncProvider(root, context.secrets);
-  const workItemSync = new WorkItemSyncProvider(root, context.secrets);
+  const wikiSync       = new WikiSyncProvider(root, context.secrets);
+  const workItemSync   = new WorkItemSyncProvider(root, context.secrets);
+  const trelloSync     = new TrelloSyncProvider(root, context.secrets);
 
   // Wire history → status bar + panel
   tracker.onDidChange(state => {
@@ -46,7 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
   apiDiagnostics.start();
   panelProvider.updateAudit(apiDiagnostics.getSummary(), apiDiagnostics.isAuditStale());
 
-  // ── Run environment assessment (non-blocking) ─────────────────────────────
+  // ── Environment assessment ─────────────────────────────────────────────────
 
   const contextGen = new ContextGenerator(root);
 
@@ -58,7 +59,6 @@ export function activate(context: vscode.ExtensionContext): void {
     contextGen.setProfile(profile);
   });
 
-  // Pass profile promise to wizard so it can show assessment results
   const setupWizard = new SetupWizard(context, root, profilePromise);
 
   const treeView = vscode.window.createTreeView('claudeWorkflowPanel', {
@@ -66,37 +66,46 @@ export function activate(context: vscode.ExtensionContext): void {
     showCollapseAll: true,
   });
 
-  // ── Register all commands ────────────────────────────────────────────────
+  // ── Commands ───────────────────────────────────────────────────────────────
 
   const skill = (name: string) => () => void runner.runSkill(name as Parameters<typeof runner.runSkill>[0]);
 
   const cmds: Array<[string, () => void | Promise<void>]> = [
     // Workflow skills
-    ['claudeWorkflow.updateTests',        skill('update-tests')],
-    ['claudeWorkflow.updateUAT',          skill('update-uat')],
-    ['claudeWorkflow.regression',         skill('regression')],
-    ['claudeWorkflow.syncDesign',         skill('sync-design')],
-    ['claudeWorkflow.doneCheck',          skill('done-check')],
+    ['claudeWorkflow.updateTests',         skill('update-tests')],
+    ['claudeWorkflow.updateUAT',           skill('update-uat')],
+    ['claudeWorkflow.regression',          skill('regression')],
+    ['claudeWorkflow.syncDesign',          skill('sync-design')],
+    ['claudeWorkflow.doneCheck',           skill('done-check')],
     ['claudeWorkflow.updateObservability', skill('update-observability')],
 
     // API skills
-    ['claudeWorkflow.auditApi',        skill('audit-api')],
-    ['claudeWorkflow.syncApiDocs',     skill('sync-api-docs')],
+    ['claudeWorkflow.auditApi',            skill('audit-api')],
+    ['claudeWorkflow.syncApiDocs',         skill('sync-api-docs')],
 
     // Capture skills
-    ['claudeWorkflow.logDecision',     skill('log-decision')],
-    ['claudeWorkflow.capturePattern',  skill('capture-pattern')],
-    ['claudeWorkflow.logFailure',      skill('log-failure')],
-    ['claudeWorkflow.logDebt',         skill('log-debt')],
+    ['claudeWorkflow.logDecision',         skill('log-decision')],
+    ['claudeWorkflow.capturePattern',      skill('capture-pattern')],
+    ['claudeWorkflow.logFailure',          skill('log-failure')],
+    ['claudeWorkflow.logDebt',             skill('log-debt')],
 
     // Generate skills
-    ['claudeWorkflow.releaseNotes',    skill('release-notes')],
-    ['claudeWorkflow.postReview',      skill('post-review')],
-    ['claudeWorkflow.updatePlaybooks', skill('update-playbooks')],
+    ['claudeWorkflow.releaseNotes',        skill('release-notes')],
+    ['claudeWorkflow.postReview',          skill('post-review')],
+    ['claudeWorkflow.updatePlaybooks',     skill('update-playbooks')],
 
     // Azure DevOps sync
-    ['claudeWorkflow.syncToWiki', () => void syncToWiki(wikiSync)],
-    ['claudeWorkflow.syncDebtToWorkItems', () => void workItemSync.syncTechDebt()],
+    ['claudeWorkflow.syncToWiki',           () => void syncToWiki(wikiSync)],
+    ['claudeWorkflow.syncDebtToWorkItems',  () => void workItemSync.syncTechDebt()],
+    ['claudeWorkflow.syncMultiSourceItems', () => void workItemSync.syncMultiSource()],
+    ['claudeWorkflow.syncBoardStatus',      () => void workItemSync.syncBoardStatus()],
+
+    // Trello
+    ['claudeWorkflow.connectTrello',       () => void trelloSync.connectBoard()],
+    ['claudeWorkflow.syncToTrello',        () => void trelloSync.syncItems()],
+
+    // Board refresh
+    ['claudeWorkflow.refreshBoard', () => void refreshBoard(root, context.secrets, panelProvider, contextGen)],
 
     // Context generation
     ['claudeWorkflow.regenerateContext', () => void regenerateContext(contextGen)],
@@ -114,10 +123,10 @@ export function activate(context: vscode.ExtensionContext): void {
       });
       void apiDiagnostics.refresh();
     }],
-    ['claudeWorkflow.showPanel', () => void treeView.reveal(undefined as unknown as never)],
-    ['claudeWorkflow.appendHistory', () => void appendHistoryEntry(root, tracker)],
+    ['claudeWorkflow.showPanel',      () => void treeView.reveal(undefined as unknown as never)],
+    ['claudeWorkflow.appendHistory',  () => void appendHistoryEntry(root, tracker)],
     ['claudeWorkflow.scaffoldSkills', () => void scaffoldSkillsAdaptive(root)],
-    ['claudeWorkflow.openSetup', () => setupWizard.open()],
+    ['claudeWorkflow.openSetup',      () => setupWizard.open()],
   ];
 
   for (const [id, handler] of cmds) {
@@ -137,16 +146,65 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {}
 
+// ── Board refresh ────────────────────────────────────────────────────────────
+
+async function refreshBoard(
+  root: string,
+  secrets: vscode.SecretStorage,
+  panel: WorkflowPanelProvider,
+  contextGen: ContextGenerator
+): Promise<void> {
+  panel.setBoardState({ loading: true });
+
+  const adoCfg = vscode.workspace.getConfiguration('claudeWorkflow.azureDevOps');
+  const org    = adoCfg.get<string>('organization');
+  const proj   = adoCfg.get<string>('project');
+
+  let adoSprintName = '';
+  let adoItems: import('./azureDevOps').AdoSprintItem[] = [];
+  let trelloCards: import('./trelloClient').TrelloCard[] = [];
+  const trelloCfg      = vscode.workspace.getConfiguration('claudeWorkflow.trello');
+  const trelloBoardName = trelloCfg.get<string>('boardName') || '';
+
+  // Load ADO sprint items
+  if (org && proj) {
+    try {
+      const client = new AzureDevOpsClient({ organization: org, project: proj }, secrets);
+      const stored = await secrets.get('claudeWorkflow.azureDevOps.pat');
+      if (stored) {
+        const { sprintName, items } = await client.getActiveSprintItems();
+        adoSprintName = sprintName;
+        adoItems      = items;
+        contextGen.setSprintItems(items, sprintName);
+      }
+    } catch { /* ADO not reachable — leave empty */ }
+  }
+
+  // Load Trello in-progress cards
+  if (trelloCfg.get<string>('boardId') && trelloCfg.get<string>('inProgressListId')) {
+    const { TrelloSyncProvider } = await import('./trelloSync.js');
+    const trelloSync = new TrelloSyncProvider(root, secrets);
+    trelloCards = await trelloSync.getActiveCards();
+  }
+
+  panel.setBoardState({
+    loading:         false,
+    adoSprintName,
+    adoItems,
+    trelloCards,
+    trelloBoardName,
+    lastLoaded:      new Date(),
+  });
+}
+
 // ── Adaptive scaffolding ────────────────────────────────────────────────────
 
 async function scaffoldSkillsAdaptive(root: string): Promise<void> {
   const skillsDir = path.join(root, '.claude', 'skills');
   if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true });
 
-  const profile = getCachedProfile();
-  const templates = profile
-    ? getScaffoldableForProfile(profile)
-    : getScaffoldableTemplates();
+  const profile   = getCachedProfile();
+  const templates = profile ? getScaffoldableForProfile(profile) : getScaffoldableTemplates();
 
   if (templates.length === 0) {
     void vscode.window.showInformationMessage(
@@ -176,7 +234,6 @@ async function scaffoldSkillsAdaptive(root: string): Promise<void> {
     `Claude Workflow: Created ${created.length} skills (${skipped.length} already existed).`
   );
 
-  // Refresh profile so panel sees the new files
   invalidateProfile();
   void getProfile(root);
 }
@@ -184,9 +241,9 @@ async function scaffoldSkillsAdaptive(root: string): Promise<void> {
 // ── Append history ──────────────────────────────────────────────────────────
 
 async function appendHistoryEntry(root: string, tracker: HistoryTracker): Promise<void> {
-  const config = vscode.workspace.getConfiguration('claudeWorkflow');
+  const config      = vscode.workspace.getConfiguration('claudeWorkflow');
   const historyFile = config.get<string>('historyFile', 'instruction-history.toon');
-  const filePath = path.join(root, historyFile);
+  const filePath    = path.join(root, historyFile);
 
   if (!fs.existsSync(filePath)) {
     void vscode.window.showErrorMessage(`History file not found: ${historyFile}`);
@@ -197,9 +254,9 @@ async function appendHistoryEntry(root: string, tracker: HistoryTracker): Promis
   try { content = fs.readFileSync(filePath, 'utf8'); }
   catch { void vscode.window.showErrorMessage('Could not read instruction history file'); return; }
 
-  const countMatch = content.match(/instructions\[(\d+)\]/);
+  const countMatch   = content.match(/instructions\[(\d+)\]/);
   const currentCount = countMatch ? parseInt(countMatch[1], 10) : 0;
-  const nextId = currentCount + 1;
+  const nextId       = currentCount + 1;
 
   const instruction = await vscode.window.showInputBox({
     prompt: 'Summarise what was done (plain English)',
@@ -223,8 +280,8 @@ async function appendHistoryEntry(root: string, tracker: HistoryTracker): Promis
   if (actions === undefined) return;
 
   const actionList = actions.split(',').map(a => a.trim()).filter(Boolean);
-  const now = new Date();
-  const iso = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const now  = new Date();
+  const iso  = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
   const entry = [
     `  -`,
@@ -276,7 +333,7 @@ function watchForGitCommit(root: string, tracker: HistoryTracker, ctx: vscode.Ex
   ctx.subscriptions.push(watcher);
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getWorkspaceRoot(): string | null {
   const f = vscode.workspace.workspaceFolders;
@@ -288,7 +345,7 @@ async function regenerateContext(contextGen: ContextGenerator): Promise<void> {
   const parts: string[] = [];
   if (result.written.length) parts.push(`Updated: ${result.written.join(', ')}`);
   if (result.skipped.length) parts.push(`Skipped: ${result.skipped.join(', ')}`);
-  if (result.errors.length) parts.push(`Errors: ${result.errors.join(', ')}`);
+  if (result.errors.length)  parts.push(`Errors: ${result.errors.join(', ')}`);
 
   if (parts.length === 0) {
     void vscode.window.showInformationMessage('Context: no AI tools detected to write context for.');
@@ -313,7 +370,7 @@ async function syncToWiki(wikiSync: WikiSyncProvider): Promise<void> {
   if (result.created.length) parts.push(`Created: ${result.created.join(', ')}`);
   if (result.updated.length) parts.push(`Updated: ${result.updated.join(', ')}`);
   if (result.skipped.length) parts.push(`Skipped (no local file): ${result.skipped.length}`);
-  if (result.errors.length) parts.push(`Errors: ${result.errors.map(e => e.doc).join(', ')}`);
+  if (result.errors.length)  parts.push(`Errors: ${result.errors.map(e => e.doc).join(', ')}`);
 
   if (parts.length === 0) {
     void vscode.window.showInformationMessage('Wiki sync: nothing to sync.');

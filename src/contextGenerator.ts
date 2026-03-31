@@ -38,12 +38,19 @@ export class ContextGenerator implements vscode.Disposable {
   private profile: ProjectProfile | null = null;
   private docWatchers: vscode.FileSystemWatcher[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private sprintItems: Array<{ title: string; state: string; workItemType: string; assignedTo: string; iterationName: string }> = [];
+  private sprintName = '';
 
   constructor(private readonly workspaceRoot: string) {}
 
   setProfile(profile: ProjectProfile): void {
     this.profile = profile;
     this.setupWatchers();
+  }
+
+  setSprintItems(items: Array<{ title: string; state: string; workItemType: string; assignedTo: string; iterationName: string }>, sprintName: string): void {
+    this.sprintItems = items;
+    this.sprintName  = sprintName;
   }
 
   /** Generate context files for all detected AI tools. */
@@ -195,6 +202,17 @@ export class ContextGenerator implements vscode.Disposable {
           });
         }
       } catch { /* malformed JSON */ }
+    }
+
+    // 8. Current sprint items (ADO)
+    if (this.sprintItems.length > 0) {
+      const lines = this.sprintItems.slice(0, 10).map(
+        item => `- [${item.state}] ${item.title} (${item.workItemType}${item.assignedTo ? ` · ${item.assignedTo}` : ''})`
+      );
+      sections.push({
+        title: `Current Sprint${this.sprintName ? ': ' + this.sprintName : ''}`,
+        content: lines.join('\n'),
+      });
     }
 
     return sections;

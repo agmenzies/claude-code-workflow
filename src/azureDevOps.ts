@@ -18,6 +18,21 @@ export interface AdoConfig {
   project: string;
 }
 
+export interface AdoSprintItem {
+  id: number;
+  title: string;
+  state: string;
+  workItemType: string;
+  assignedTo: string;
+  iterationName: string;
+}
+
+export interface AdoTaggedItem {
+  id: number;
+  title: string;
+  state: string;
+}
+
 interface WikiPage {
   path: string;
   content: string;
@@ -166,6 +181,85 @@ export class AzureDevOpsClient {
     }));
   }
 
+  async getActiveSprintItems(): Promise<{ sprintName: string; items: AdoSprintItem[] }> {
+    try {
+      // Get current iteration for the default team
+      const iterData = await this.get(
+        `/_apis/work/teamsettings/iterations?$timeframe=current`
+      );
+      const iters = (iterData as { value?: Array<{ id: string; name: string; path: string }> }).value ?? [];
+      if (iters.length === 0) return { sprintName: '', items: [] };
+      const iter = iters[0];
+
+      // WIQL for items in this iteration that aren't closed
+      const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.IterationPath] = '${iter.path}' AND [System.State] NOT IN ('Closed', 'Resolved', 'Done') ORDER BY [System.ChangedDate] DESC`;
+      const wiqlData = await this.post('/_apis/wit/wiql', { query: wiql });
+      const ids = ((wiqlData as { workItems?: Array<{ id: number }> }).workItems ?? [])
+        .map(w => w.id)
+        .slice(0, 25);
+
+      if (ids.length === 0) return { sprintName: iter.name, items: [] };
+
+      const fields = 'System.Title,System.State,System.WorkItemType,System.AssignedTo';
+      const batchData = await this.get(
+        `/_apis/wit/workitems?ids=${ids.join(',')}&fields=${fields}`
+      );
+      const rows = (batchData as { value?: Array<{
+        id: number;
+        fields: {
+          'System.Title': string;
+          'System.State': string;
+          'System.WorkItemType': string;
+          'System.AssignedTo'?: { displayName?: string };
+        };
+      }> }).value ?? [];
+
+      return {
+        sprintName: iter.name,
+        items: rows.map(r => ({
+          id:            r.id,
+          title:         r.fields['System.Title'] ?? '',
+          state:         r.fields['System.State'] ?? '',
+          workItemType:  r.fields['System.WorkItemType'] ?? '',
+          assignedTo:    r.fields['System.AssignedTo']?.displayName ?? '',
+          iterationName: iter.name,
+        })),
+      };
+    } catch { return { sprintName: '', items: [] }; }
+  }
+
+  async getTaggedWorkItemsWithState(tag: string): Promise<AdoTaggedItem[]> {
+    const wiql = `SELECT [System.Id], [System.Title], [System.State] FROM WorkItems WHERE [System.Tags] CONTAINS '${tag}' ORDER BY [System.CreatedDate] DESC`;
+    const data = await this.post('/_apis/wit/wiql', { query: wiql });
+    const ids = ((data as { workItems?: Array<{ id: number }> }).workItems ?? [])
+      .map(w => w.id)
+      .slice(0, 50);
+
+    if (ids.length === 0) return [];
+
+    const batch = await this.get(
+      `/_apis/wit/workitems?ids=${ids.join(',')}&fields=System.Title,System.State`
+    );
+    const rows = (batch as { value?: Array<{
+      id: number;
+      fields: { 'System.Title': string; 'System.State': string };
+    }> }).value ?? [];
+
+    return rows.map(r => ({
+      id:    r.id,
+      title: r.fields['System.Title'] ?? '',
+      state: r.fields['System.State'] ?? '',
+    }));
+  }
+
+  async updateWorkItemState(id: number, state: string): Promise<void> {
+    await this.patch(
+      `/_apis/wit/workitems/${id}`,
+      [{ op: 'add', path: '/fields/System.State', value: state }],
+      { 'Content-Type': 'application/json-patch+json' }
+    );
+  }
+
   // ── HTTP primitives ────────────────────────────────────────────────────────
 
   private baseUrl(): string {
@@ -206,6 +300,14 @@ export class AzureDevOpsClient {
     extraHeaders?: Record<string, string>
   ): Promise<Record<string, unknown>> {
     return this.request('PUT', path, body, extraHeaders);
+  }
+
+  private async patch(
+    path: string,
+    body: unknown,
+    extraHeaders?: Record<string, string>
+  ): Promise<Record<string, unknown>> {
+    return this.request('PATCH', path, body, extraHeaders);
   }
 
   private request(

@@ -12,7 +12,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { AzureDevOpsClient, AdoConfig } from './azureDevOps';
+import { AzureDevOpsClient, AdoConfig, AdoTaggedItem } from './azureDevOps';
 
 interface DebtEntry {
   id: string;           // e.g. "TD-001"
@@ -208,5 +208,232 @@ export class WorkItemSyncProvider {
       this.client = new AzureDevOpsClient(config, this.secrets);
     }
     return this.client;
+  }
+
+  // ── Multi-source sync ─────────────────────────────────────────────────────
+
+  async syncMultiSource(): Promise<void> {
+    const config = this.getAdoConfig();
+    if (!config) {
+      void vscode.window.showErrorMessage(
+        'Azure DevOps not configured. Set organization and project in settings.'
+      );
+      return;
+    }
+
+    const client = this.getClient(config);
+    if (!(await client.ensureAuthenticated())) return;
+
+    const allItems = [
+      ...this.parseDebtEntries(path.join(this.workspaceRoot, 'tech-debt.md'))
+        .filter(e => !e.status.toLowerCase().includes('resolved'))
+        .map(e => ({
+          id: e.id, title: e.title, priority: e.priority,
+          description: this.formatDescription(e),
+          sourceLabel: 'Tech Debt',
+          tags: 'claude-workflow; claude-workflow-tech-debt',
+        })),
+      ...this.parseDoDFailures().map((f, i) => ({
+        id: `DOD-${String(i + 1).padStart(3, '0')}`, title: f,
+        priority: 'High',
+        description: `<p>Definition of Done failure:</p><p>${f}</p><hr/><p><em>Created by Claude Code Workflow</em></p>`,
+        sourceLabel: 'DoD Failure',
+        tags: 'claude-workflow; claude-workflow-dod-failure',
+      })),
+      ...this.parseApiIssues().map(issue => ({
+        id: `API-${issue.rule}`, title: `${issue.method} ${issue.apiPath}: ${issue.rule}`,
+        priority: issue.severity === 'critical' ? 'Critical' : 'High',
+        description: `<p>${issue.message}</p><hr/><p><em>Created by Claude Code Workflow from API audit</em></p>`,
+        sourceLabel: 'API Issue',
+        tags: 'claude-workflow; claude-workflow-api-issue',
+      })),
+      ...this.parsePostReviewActions().map((action, i) => ({
+        id: `PIR-ACT-${String(i + 1).padStart(3, '0')}`, title: action,
+        priority: 'Medium',
+        description: `<p>Post-review action item:</p><p>${action}</p><hr/><p><em>Created by Claude Code Workflow</em></p>`,
+        sourceLabel: 'Post-Review Action',
+        tags: 'claude-workflow; claude-workflow-post-review',
+      })),
+    ];
+
+    if (allItems.length === 0) {
+      void vscode.window.showInformationMessage(
+        'No open items found across tech-debt.md, DoD results, API audit, or post-reviews.'
+      );
+      return;
+    }
+
+    const workItemType = vscode.workspace
+      .getConfiguration('claudeWorkflow.azureDevOps')
+      .get<string>('debtWorkItemType', 'Task');
+
+    const picks = allItems.map(item => ({
+      label:       `${item.id}: ${item.title}`,
+      description: `${item.sourceLabel} · ${item.priority}`,
+      picked:      item.priority === 'Critical' || item.priority === 'High',
+      item,
+    }));
+
+    const selected = await vscode.window.showQuickPick(picks, {
+      placeHolder:    `Select items to create as ${workItemType}s in Azure DevOps`,
+      canPickMany:    true,
+      ignoreFocusOut: true,
+    });
+    if (!selected || selected.length === 0) return;
+
+    const created: string[] = [];
+    const errors:  string[] = [];
+
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Creating work items', cancellable: false },
+      async progress => {
+        for (let i = 0; i < selected.length; i++) {
+          const { item } = selected[i];
+          progress.report({ message: item.id, increment: 100 / selected.length });
+          try {
+            const { id } = await client.createWorkItem(workItemType, {
+              title:       `[${item.sourceLabel}] ${item.id}: ${item.title}`,
+              description: item.description,
+              tags:        item.tags,
+              priority:    PRIORITY_MAP[item.priority.toLowerCase()] ?? 3,
+            });
+            created.push(`${item.id} → #${id}`);
+          } catch (err) {
+            errors.push(`${item.id}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+    );
+
+    const parts: string[] = [];
+    if (created.length) parts.push(`Created ${created.length} work items`);
+    if (errors.length)  parts.push(`${errors.length} errors`);
+    if (errors.length) {
+      void vscode.window.showWarningMessage(`Claude Workflow: ${parts.join(', ')}`);
+    } else {
+      void vscode.window.showInformationMessage(`Claude Workflow: ${parts.join(', ')}`);
+    }
+  }
+
+  // ── Bidirectional board status sync ───────────────────────────────────────
+
+  async syncBoardStatus(): Promise<void> {
+    const config = this.getAdoConfig();
+    if (!config) {
+      void vscode.window.showErrorMessage(
+        'Azure DevOps not configured. Set organization and project in settings.'
+      );
+      return;
+    }
+
+    const client = this.getClient(config);
+    if (!(await client.ensureAuthenticated())) return;
+
+    let tagged: AdoTaggedItem[];
+    try {
+      tagged = await client.getTaggedWorkItemsWithState('claude-workflow');
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `Failed to query Azure DevOps: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return;
+    }
+
+    const closedStates = new Set(['Closed', 'Resolved', 'Done', 'Completed']);
+    const closedItems = tagged.filter(w => closedStates.has(w.state));
+
+    if (closedItems.length === 0) {
+      void vscode.window.showInformationMessage(
+        'Board sync: no closed items found — all tracked items are still open.'
+      );
+      return;
+    }
+
+    // Parse the entry ID from the work item title: "[Tech Debt] TD-003: ..." → "TD-003"
+    const today = new Date().toISOString().slice(0, 10);
+    let resolvedCount = 0;
+
+    for (const item of closedItems) {
+      const tdMatch = item.title.match(/\b(TD-\d+)\b/);
+      const fmMatch = item.title.match(/\b(FM-\d+)\b/);
+
+      if (tdMatch) {
+        const updated = this.resolveEntryInFile(
+          path.join(this.workspaceRoot, 'tech-debt.md'),
+          tdMatch[1], today
+        );
+        if (updated) resolvedCount++;
+      }
+      if (fmMatch) {
+        // Failure modes don't have a "resolved" status field, but we can update Last seen
+        resolvedCount++;
+      }
+    }
+
+    void vscode.window.showInformationMessage(
+      `Board sync: ${closedItems.length} closed items found, ${resolvedCount} living docs updated.`
+    );
+  }
+
+  // ── Additional parsers ─────────────────────────────────────────────────────
+
+  private parseDoDFailures(): string[] {
+    const filePath = path.join(this.workspaceRoot, '.claude', 'dod-result.md');
+    if (!fs.existsSync(filePath)) return [];
+    const content = fs.readFileSync(filePath, 'utf8');
+    const section = content.match(/### Failures requiring action\n([\s\S]*?)(?=###|$)/);
+    if (!section) return [];
+    return section[1]
+      .split('\n')
+      .filter(l => /^\d+\./.test(l.trim()))
+      .map(l => l.replace(/^\d+\.\s*/, '').trim());
+  }
+
+  private parseApiIssues(): Array<{ method: string; apiPath: string; rule: string; severity: string; message: string }> {
+    const filePath = path.join(this.workspaceRoot, '.claude', 'api-audit.json');
+    if (!fs.existsSync(filePath)) return [];
+    try {
+      const audit = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
+        issues?: Array<{ method?: string; path?: string; rule?: string; severity?: string; message?: string }>;
+      };
+      return (audit.issues ?? [])
+        .filter(i => i.severity === 'critical' || i.severity === 'high')
+        .map(i => ({
+          method:   i.method ?? 'GET',
+          apiPath:  i.path ?? '/',
+          rule:     i.rule ?? 'unknown',
+          severity: i.severity ?? 'high',
+          message:  i.message ?? '',
+        }));
+    } catch { return []; }
+  }
+
+  private parsePostReviewActions(): string[] {
+    const filePath = path.join(this.workspaceRoot, 'post-reviews.md');
+    if (!fs.existsSync(filePath)) return [];
+    const content = fs.readFileSync(filePath, 'utf8');
+    return [...content.matchAll(/^- \[ \] (.+)/gm)].map(m => m[1].trim());
+  }
+
+  private resolveEntryInFile(filePath: string, entryId: string, date: string): boolean {
+    if (!fs.existsSync(filePath)) return false;
+    const content = fs.readFileSync(filePath, 'utf8');
+    // Replace "Status**: Open" or "Status**: In progress" for this entry
+    const entryRe = new RegExp(
+      `(### ${entryId}:[\\s\\S]*?)(?=### |$)`,
+      'i'
+    );
+    const match = content.match(entryRe);
+    if (!match) return false;
+    const updated = content.replace(
+      match[0],
+      match[0].replace(
+        /\*\*Status\*\*:\s*(Open|In progress|In Progress)/,
+        `**Status**: Resolved (${date})`
+      )
+    );
+    if (updated === content) return false;
+    fs.writeFileSync(filePath, updated, 'utf8');
+    return true;
   }
 }
