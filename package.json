@@ -215,8 +215,17 @@
         "icon": "$(warning)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeWorkflowContainer",
+          "title": "Claude Code Workflow",
+          "icon": "media/icon-activity.svg"
+        }
+      ]
+    },
     "views": {
-      "explorer": [
+      "claudeWorkflowContainer": [
         {
           "id": "claudeWorkflowPanel",
           "name": "Claude Code Workflow",
